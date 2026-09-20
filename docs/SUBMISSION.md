@@ -12,5 +12,6 @@ explicitly authorized.
 
 The qualification-v1 failure and qualification-v2 source-verification trail
 are retained locally under versioned artifacts. Qualification-v2 Core and Vault
-are deployed but unbound; no address in those artifacts is a canonical
-production claim.
+are deployed, with the Vault-side binding finalized while the Core-side binding
+remains pending; no address in those artifacts is a canonical production
+claim.

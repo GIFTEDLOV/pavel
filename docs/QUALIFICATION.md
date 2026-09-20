@@ -52,8 +52,11 @@ retrieval produced 18,808 bytes with exact SHA-256
 `get_core_address()` returned the corrected Core exactly, proving the live
 Address-calldata constructor regression.
 
-The pair is deployed but unbound. Core still returns the zero Vault address.
-The next protected operations are `Vault.bind_core()` followed by
-`Core.set_vault_address(vault)`. The active account is locked; no credential
-was requested or inspected. No canonical production deployment is authorized
-by this evidence.
+The Vault-side binding then finalized successfully in transaction
+`0x4cff26c3356d2481a5ab731a995ed7ebe78ded2ec3314883c9c9345b00578be7`, nonce
+`171`, with `MAJORITY_AGREE` and successful execution. The Vault readback
+returned the corrected Core, and history item zero recorded `CORE_BOUND`.
+Before the second binding, Core still returned the zero Vault address. The
+remaining protected operation is `Core.set_vault_address(vault)`. The active
+account is locked; no credential was requested or inspected. No canonical
+production deployment is authorized by this evidence.

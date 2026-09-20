@@ -35,6 +35,16 @@
       "sourceSha256": "29fd8a384813617b7d37226438b5bb31429ad6e12e81a3ada210429cebf7a794"
     }
   ],
-  "bindingTransaction": null,
-  "qualificationConclusion": "PAIR_DEPLOYED_UNBOUND"
+  "bindingTransaction": {
+    "vaultBindCore": {
+      "tx": "0x4cff26c3356d2481a5ab731a995ed7ebe78ded2ec3314883c9c9345b00578be7",
+      "nonce": 171,
+      "status": "FINALIZED",
+      "execution": "SUCCESS",
+      "vaultCoreAddressReadback": "0xbb5e144f1b93f5e7b1a5b3fe07ccf677b29b16ea",
+      "vaultCoreBoundReadback": true
+    },
+    "coreSetVault": null
+  },
+  "qualificationConclusion": "VAULT_BOUND_CORE_UNBOUND"
 }
