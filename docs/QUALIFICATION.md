@@ -69,6 +69,13 @@ The deployed schema exposes no principal getter and this method does not append
 history, so the strongest available proof is the finalized contract-state
 snapshot: it contains the sender-address map entry and the true marker for the
 declared `principals: TreeMap[Address,bool]` field. The active account is
-locked; no credential was requested or inspected. The next write is controlled
-agent registration. No canonical production deployment is authorized by this
-evidence.
+locked; no credential was requested or inspected.
+
+Agent registration then finalized at nonce `174` in transaction
+`0xb34afbd1f7809f892169f892bf3cd7b291c36bbb985bbc28ddd33d35705ce511`.
+The finalized state snapshot added the exact agent address and active marker
+for the declared agent registry. The deployed source requires no separate
+authority registration or delegation before a root Mandate; counterparty
+registration is required later by `create_intent`. The prepared fixture is
+stored in `artifacts/studionet/qualification-v2/qualification-fixture.json`.
+No canonical production deployment is authorized by this evidence.

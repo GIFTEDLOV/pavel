@@ -61,7 +61,15 @@
       "execution": "SUCCESS",
       "principal": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f"
     },
-    "nextDeployerNonce": 174
+    "agentRegistration": {
+      "tx": "0xb34afbd1f7809f892169f892bf3cd7b291c36bbb985bbc28ddd33d35705ce511",
+      "nonce": 174,
+      "status": "FINALIZED",
+      "execution": "SUCCESS",
+      "agent": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+      "label": "qualification-agent"
+    },
+    "nextDeployerNonce": 175
   },
-  "qualificationConclusion": "PRINCIPAL_REGISTERED_AGENT_PENDING"
+  "qualificationConclusion": "AGENT_REGISTERED_MANDATE_PENDING"
 }

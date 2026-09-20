@@ -22,9 +22,10 @@ PAVEL is a distinct protocol. No live deployment addresses, transaction hashes, 
 - qualification-v2 Vault binding: tx `0x4cff26c3356d2481a5ab731a995ed7ebe78ded2ec3314883c9c9345b00578be7`, nonce `171`, finalized with successful execution; Vault history records `CORE_BOUND`.
 - qualification-v2 Core binding: tx `0xe9f17f1ca529616682ea4f40605182460580a30d553ad6efd3e966663a410cb1`, nonce `172`, finalized with successful execution; Core history records `VAULT_BOUND`.
 - qualification-v2 principal registration: tx `0x62ecaa10b2f11914ebfb3819334a4edcbe96954010b64a3cabb9cf24b76df7c7`, nonce `173`, finalized with successful execution; finalized state snapshot records the principal map mutation.
+- qualification-v2 agent registration: tx `0xb34afbd1f7809f892169f892bf3cd7b291c36bbb985bbc28ddd33d35705ce511`, nonce `174`, finalized with successful execution; finalized state snapshot records the exact agent address and active marker.
 
 The v1 failure is preserved in `artifacts/studionet/qualification-v1/` and is
 not sanitized. The v2 artifacts are separate and currently record a finalized
-Core, a finalized Vault, bidirectional binding, and principal registration;
-remaining lifecycle writes await secure manual signing. The canonical
-deployment manifest remains undeployed.
+Core, a finalized Vault, bidirectional binding, principal registration, and
+agent registration; remaining lifecycle writes await secure manual signing.
+The canonical deployment manifest remains undeployed.
