@@ -18,6 +18,9 @@ export async function writeOnce(input: {
   write: Record<string, unknown>;
 }): Promise<TrackedWrite> {
   const client = createPavelClient(input.account);
+  // The caller supplies the already-validated write request. The client call
+  // happens exactly once; persistence begins immediately after the hash is
+  // returned so timeouts never trigger a blind rebroadcast.
   const submitted = String(await client.writeContract({ value: 0n, ...input.write } as never));
   if (!/^0x[0-9a-fA-F]{64}$/.test(submitted)) throw new Error("GenLayer write did not return a transaction ID");
   const hash = submitted as TransactionHash;

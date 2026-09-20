@@ -17,6 +17,7 @@ jobs:
       - run: $env:GENVM_VERSION='v0.2.16'; pytest -q
       - run: powershell -ExecutionPolicy Bypass -File scripts/lint-contracts.ps1
       - run: python scripts/core-vault-interface-parity.py
+      - run: python scripts/address-calldata-parity.py
       - run: node scripts/semantic-authority-audit.mjs
       - run: $env:PATH="$pwd\.venv\Scripts;$env:PATH"; $env:GENVM_VERSION='v0.2.16'; .venv/Scripts/genvm-lint.exe schema contracts/pavel_core.py --json
       - run: $env:PATH="$pwd\.venv\Scripts;$env:PATH"; $env:GENVM_VERSION='v0.2.16'; .venv/Scripts/genvm-lint.exe schema contracts/pavel_vault.py --json
@@ -26,6 +27,7 @@ jobs:
       - run: node scripts/contract-source-hash.mjs
       - run: node tools/qualification/validate-manifest.mjs
       - run: python scripts/validate-deployment-manifest.py
+      - run: python scripts/validate-qualification-v2.py
   frontend:
     runs-on: windows-latest
     steps:

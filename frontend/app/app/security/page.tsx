@@ -1,2 +1,7 @@
-import { ProtocolShell, EmptyState } from "@/components/protocol-shell";
-export default function SecurityPage() { return <ProtocolShell><EmptyState title="Security" body="Protocol invariants, threat boundaries, network guard status, and known settlement limitations are documented in the repository." /></ProtocolShell>; }
+import Link from "next/link";
+import { ProtocolShell } from "@/components/protocol-shell";
+import { RouteIntro, Section, TrustBoundary } from "@/components/protocol-ui";
+
+const invariants = ["Unassessed is never authorization.", "Evidence transport cannot redefine its committed identity.", "Semantic vectors cannot choose addresses, amounts, or deadlines.", "Only authenticated qualifying challenges block settlement.", "A challenge result resolves only that challenge.", "Vault accounting remains the economic source of truth.", "A missing poll response never triggers a blind rebroadcast."];
+
+export default function SecurityPage() { return <ProtocolShell><RouteIntro eyebrow="SECURITY / REVIEW SURFACE" title="PAVEL makes uncertainty visible at every boundary." body="The security surface maps the protocol’s deterministic authority, semantic consensus, evidence provenance, challenge integrity, and transaction observation boundaries." /><Section title="Invariants"><div className="list">{invariants.map((item, index) => <div className="row" key={item}><span className="mono">{String(index + 1).padStart(2, "0")}</span><span>{item}</span></div>)}</div></Section><TrustBoundary title="Known limitation" tone="warning" body="External native GEN messages introduce an observation boundary. RELEASE_PENDING or REFUND_PENDING is not presented as recipient-confirmed payment without appropriate evidence." /><Link className="text-link" href="/app/proof">Inspect provenance model →</Link></ProtocolShell>; }

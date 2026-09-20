@@ -1,19 +1,35 @@
 # PAVEL
 
-PAVEL (Policy-governed Autonomous Value Execution Layer) is a GenLayer Studionet foundation for constitutional agent authority, deterministic GEN custody, evidence authentication, fulfillment adjudication, and dispute-aware settlement.
+PAVEL (Policy-governed Autonomous Value Execution Layer) is protocol
+infrastructure for constitutional agent authority, deterministic GEN custody,
+evidence authentication, fulfillment adjudication, and dispute-aware
+settlement. It is designed for a principal who wants an agent to act within a
+sealed policy, not to receive an unrestricted withdrawal capability.
 
-Phase 1 is local-only. It contains two authoritative Intelligent Contracts:
+The two authoritative Intelligent Contracts are deliberately separated:
 
-- `contracts/pavel_core.py` — principals, agents, sealed Mandates, delegation, frozen Intents, evidence definitions and snapshots, semantic results, disputes, and deterministic settlement instructions.
-- `contracts/pavel_vault.py` — payable GEN custody, reservations, budgets, conservation accounting, replay protection, and pending external settlement.
+- `contracts/pavel_core.py` owns principals, agents, Mandates, delegation,
+  frozen Intents, evidence identity and snapshots, semantic decisions,
+  disputes, and deterministic settlement instructions.
+- `contracts/pavel_vault.py` owns payable GEN, reservations, budgets,
+  conservation accounting, replay protection, and pending external settlement.
 
-The browser client is deliberately chain-state honest: it reads Core and Vault, persists the returned GenLayer transaction ID immediately, resumes polling for that same ID, separates protocol finality from execution success, and does not claim external EOA transfer completion from parent finalization alone.
+The browser client is chain-state honest. It never presents an unassessed
+Intent as approved, persists a returned GenLayer transaction ID before
+polling, separates finality from execution success, and does not claim an
+external EOA transfer completed merely because its parent transaction
+finalized.
 
-Evidence transport is separate from committed evidence identity. Approved recovery URLs can only reproduce the exact committed SHA-256 and byte length under sealed authority constraints. Core also accepts bounded permissionless challenges: every challenge has its own evidence, snapshot, result, and resolution state, and any unresolved qualifying challenge blocks settlement.
+Evidence identity is separate from transport: an approved recovery URL may
+restore availability only when the exact committed bytes, digest, length,
+authority, Intent, Mandate, and policy binding match. Permissionless challenge
+records are independent and append-only; only an authenticated qualifying
+challenge blocks settlement.
 
 ## Local verification
 
 ```powershell
+$env:GENVM_VERSION='v0.2.16'
 \.venv\Scripts\pytest.exe -q
 \.venv\Scripts\genvm-lint.exe check contracts\pavel_core.py --json
 \.venv\Scripts\genvm-lint.exe check contracts\pavel_vault.py --json
@@ -21,17 +37,58 @@ Evidence transport is separate from committed evidence identity. Approved recove
 \.venv\Scripts\genvm-lint.exe typecheck contracts\pavel_core.py --json
 \.venv\Scripts\genvm-lint.exe typecheck contracts\pavel_vault.py --json
 node tools/qualification/validate-manifest.mjs
-pnpm --dir frontend install
 pnpm --dir frontend typecheck
 pnpm --dir frontend lint
 pnpm --dir frontend build
 node scripts/network-guard.mjs
 ```
 
-No deployment, faucet request, live transaction, GitHub remote, or GitHub push is part of Phase 1.
+GenVM-dependent tests are run serially. A network qualification is separate
+from local verification and uses a new versioned artifact directory.
+
+The current qualification-v2 Core has finalized successfully and is source
+verified. The corrected Vault remains awaiting a secure manual signing step.
+Qualification-v1 remains historical failure evidence and is never a runtime
+default. No server wallet, database authority, GitHub remote, or public
+deployment is configured.
 
 ## Canonical network
 
-PAVEL V1 targets stable Studionet: `https://studio.genlayer.com/api`, chain `61999`, native `GEN`, explorer `https://explorer-studio.genlayer.com`.
+PAVEL targets stable Studionet: `https://studio.genlayer.com/api`, chain
+`61999`, native `GEN`, explorer `https://explorer-studio.genlayer.com`.
 
-Read the implementation decisions in [`docs/TOOLCHAIN.md`](docs/TOOLCHAIN.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) before changing contract or SDK versions.
+## Architecture
+
+```mermaid
+flowchart LR
+  Principal -->|sealed Mandate| Core[PavelCore]
+  Agent -->|frozen Intent| Core
+  Evidence -->|authenticated snapshot| Core
+  Core -->|synchronous authorization read| Vault[PavelVault]
+  Vault -->|reserve / pending settlement| GEN[(native GEN)]
+  Challenge -->|independent evidence| Core
+```
+
+Core decides policy and semantic facts; Vault decides deterministic economic
+transitions. A Core write does not synchronously write Vault. The protocol uses
+pull verification across typed Intelligent Contract views.
+
+## Repository map
+
+`contracts/` contains the authoritative contracts. `tests/` contains Direct
+Mode, adversarial, property, and boundary tests. `frontend/` contains the
+typed chain client and route shell. `docs/` contains protocol, security,
+qualification, release, and provenance records. Qualification artifacts are
+versioned below `artifacts/studionet/` and are not canonical configuration.
+
+## Qualification status
+
+The first Vault deployment exposed a live constructor boundary defect:
+`Address(Address(...))`. It is preserved as qualification-v1 provenance. The
+corrected qualification-v2 Core is finalized and byte-for-byte source
+verified. Corrected Vault deployment, binding, funding, and lifecycle
+qualification still require the operator's secure manual signing step.
+
+Read [`docs/QUALIFICATION.md`](docs/QUALIFICATION.md),
+[`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md), and
+[`docs/STEWARD_NOTES.md`](docs/STEWARD_NOTES.md) before any deployment.

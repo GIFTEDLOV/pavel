@@ -23,3 +23,28 @@ bounded legacy string/bytes representation. Address-boundary regression tests
 exercise the stable v0.2.16 runtime type, including zero-address rejection and
 the Core address parameters. No replacement deployment or Core binding was
 performed after the failure.
+
+## Qualification-v2 corrected Core
+
+The corrected source was committed at `e48e851398a11af2f5bf2a9b820003148afd315c`.
+The user-signed Core deployment was:
+
+- transaction: `0x7267525ae6e0e08780850c4a8316c163447ba47dd208aecb73f74bc8cda16840`;
+- nonce: `169`;
+- address: `0xBb5e144F1b93F5E7b1A5B3fE07ccf677B29b16EA`;
+- status: `FINALIZED`;
+- consensus: `MAJORITY_AGREE`;
+- leader execution: `SUCCESS`;
+- local/deployed source SHA-256: `d3ad610319a175041b5d993826a1845e04a3feb4e59082be819859967b858259`;
+- source retrieval: stable `gen_getContractCode`, 95,533 bytes, exact byte match.
+
+Readback proved the corrected Core owner is the qualification deployer and
+`get_vault_address()` is the zero address. The deployed schema has no
+`get_vault_bound` method; an attempted call was rejected as an undefined
+method, so the zero-address read is the authoritative unbound indicator.
+
+Qualification-v2 is not complete: the corrected Vault has not been deployed,
+bound, funded, or exercised. The stable account is locked and requires the
+operator to run the exact CLI deployment command manually; no credential was
+requested or inspected. No canonical production deployment is authorized by
+this evidence.

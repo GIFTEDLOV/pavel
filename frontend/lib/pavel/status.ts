@@ -20,6 +20,7 @@ const labels: Record<ProtocolStatus, { label: string; tone: StatusTone }> = {
   REJECTED: { label: "Consensus rejection", tone: "danger" },
   AUTHORIZED: { label: "Consensus-authorized", tone: "success" },
   FUNDS_RESERVED: { label: "Funds reserved", tone: "success" },
+  RESERVED: { label: "Funds reserved", tone: "success" },
   FULFILLED: { label: "Fulfillment consensus recorded", tone: "success" },
   NOT_FULFILLED: { label: "Fulfillment not established", tone: "danger" },
   FULFILLMENT_PENDING: { label: "Fulfillment assessment pending", tone: "warning" },

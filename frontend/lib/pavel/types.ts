@@ -18,6 +18,7 @@ export type ProtocolStatus =
   | "REJECTED"
   | "AUTHORIZED"
   | "FUNDS_RESERVED"
+  | "RESERVED"
   | "FULFILLED"
   | "NOT_FULFILLED"
   | "FULFILLMENT_PENDING"
