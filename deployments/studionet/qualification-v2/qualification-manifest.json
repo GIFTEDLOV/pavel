@@ -69,7 +69,16 @@
       "agent": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
       "label": "qualification-agent"
     },
-    "nextDeployerNonce": 175
+    "failedCreateMandateEmptyArgument": {
+      "tx": "0xcc4d6551d0f76df05bc8c0eefdef5e1e2a593433ede6979fd208a4220f5f64b0",
+      "nonce": 175,
+      "status": "FINALIZED",
+      "execution": "ERROR",
+      "rootCause": "LIVE_INTEGRATION_DEFECT:EMPTY_STRING_ARGUMENT_DROPPED",
+      "stateMutation": "NONE",
+      "correctedPath": "--args <agent> --args="
+    },
+    "nextDeployerNonce": 176
   },
-  "qualificationConclusion": "AGENT_REGISTERED_MANDATE_PENDING"
+  "qualificationConclusion": "ROOT_MANDATE_CALL_ENCODING_REMEDIATED_PENDING_MANUAL_SIGNING"
 }

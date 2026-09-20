@@ -79,3 +79,41 @@ authority registration or delegation before a root Mandate; counterparty
 registration is required later by `create_intent`. The prepared fixture is
 stored in `artifacts/studionet/qualification-v2/qualification-fixture.json`.
 No canonical production deployment is authorized by this evidence.
+
+## qualification-v2 empty-string calldata finding
+
+The first root-Mandate attempt was intentionally preserved rather than
+replayed. Transaction
+`0xcc4d6551d0f76df05bc8c0eefdef5e1e2a593433ede6979fd208a4220f5f64b0`
+(nonce `175`) finalized with consensus `MAJORITY_AGREE`, but every observed
+execution receipt was `ERROR` with:
+
+`TypeError: PavelCore.create_mandate() missing 1 required positional argument: 'parent_mandate_id'`.
+
+The submitted semantic calldata contained only the Address argument even
+though the intended second argument was the empty UTF-8 string. The pinned
+CLI `0.39.2` uses Commander `--args <args...>` parsing; a standalone empty
+PowerShell/native argv token was absent before Commander parsed it. This is a
+live integration defect, not a Core source defect. The finalized contract
+state hash is identical to the preceding agent-registration state, so no
+Mandate was created.
+
+The corrected stable-CLI path is:
+
+```powershell
+pnpm exec genlayer write --rpc https://studio.genlayer.com/api 0xBb5e144F1b93F5E7b1A5B3fE07ccf677B29b16EA create_mandate --args 0xCb5a845638Cbc1f95D7f8343278685682c3bA13F --args=
+```
+
+`--args=` is deliberately a non-empty argv token whose parsed value is the
+exact empty string. The local regression `node
+scripts/qualification-call-data.mjs` proves two arguments, an Address first
+argument, and a string-empty second argument. No contract source hash changed.
+The corrected write has not been broadcast by this remediation pass; the
+account remains subject to secure interactive signing.
+
+The same audit covered optional empty-string inputs on `define_evidence` and
+`define_challenge_evidence`: an empty precommitted hash is valid only with a
+zero committed byte length, and an empty recovery authority defaults to the
+sealed source authority. Required textual fields and recovery URLs remain
+non-empty. The audit is recorded in
+`artifacts/studionet/qualification-v2/empty-string-boundary-audit.json`.

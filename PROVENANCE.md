@@ -29,3 +29,12 @@ not sanitized. The v2 artifacts are separate and currently record a finalized
 Core, a finalized Vault, bidirectional binding, principal registration, and
 agent registration; remaining lifecycle writes await secure manual signing.
 The canonical deployment manifest remains undeployed.
+
+The qualification-v2 root-Mandate integration failure is also preserved:
+transaction `0xcc4d6551d0f76df05bc8c0eefdef5e1e2a593433ede6979fd208a4220f5f64b0`
+(nonce `175`) finalized with `ERROR` execution despite `MAJORITY_AGREE`. A
+standalone empty PowerShell/native argv value was dropped before the pinned CLI
+invoked `create_mandate`. The exact TypeError, calldata, validator agreement,
+and no-state-mutation proof are retained in
+`artifacts/studionet/qualification-v2/`. The corrected root-Mandate write
+awaits secure manual signing; this is not a contract-source defect.
