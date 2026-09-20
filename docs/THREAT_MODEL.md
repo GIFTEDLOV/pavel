@@ -25,3 +25,18 @@
 | Frontend compromise | Browser is not authoritative; all economic values come from Core/Vault reads. |
 | Wrong network | SDK chain/RPC guard rejects chain 61997, studio-dev, and studio-next. |
 | Settlement uncertainty | Pending external states remain unconfirmed; no blind retry. |
+
+## Qualification finding: decoded address boundaries
+
+Stable Studionet constructor calldata can arrive at contract Python as a
+GenLayer `Address` even when the caller supplied a hexadecimal address. A
+normalization boundary that unconditionally evaluates `Address(value)` is
+unsafe because `value` may already be an `Address`; the live Vault deployment
+failed before initialization for exactly this reason. The mitigation is a
+bounded `isinstance(value, Address)` branch in the Vault constructor and
+address normalizer. The same latent boundary was found in Core's security-
+critical address parameters and hardened with the same normalization rule;
+this is recorded as a source change rather than hidden as a test-only fix.
+The regression suite passes actual v0.2.16 runtime `Address` objects and
+rejects zero addresses. No caller-supplied address is accepted as an identity
+without the existing protocol ownership and authority checks.

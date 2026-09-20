@@ -44,3 +44,9 @@ deterministic smoke test passed before the full suite:
 ```powershell
 $env:GENVM_VERSION='v0.2.16'; .\.venv\Scripts\python.exe -m pytest -q -s tests/direct/test_core_lifecycle.py::test_mandate_seals_and_becomes_immutable
 ```
+
+For this remediation the stable runner was explicitly selected with
+`GENVM_VERSION=v0.2.16`; without that pin, the local cache contains unrelated
+RC archives and Direct Mode may select an RC family. The v0.2.16 cache was
+repaired before regression execution; no CLI, SDK, GenVM, or GenLayer Python
+upgrade was performed.

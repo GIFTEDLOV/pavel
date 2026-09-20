@@ -147,8 +147,11 @@ class PavelCore(gl.Contract):
         if not condition:
             raise gl.vm.UserError(message)
 
-    def _address(self, value: str) -> Address:
-        address = Address(value)
+    def _address(self, value) -> Address:
+        # Stable Studionet may deliver address calldata as an already-decoded
+        # Address object. Do not double-wrap it; stored JSON values remain
+        # supported as bounded hexadecimal strings.
+        address = value if isinstance(value, Address) else Address(value)
         self._require(address.as_hex.lower() != ZERO_ADDRESS, "zero address is not permitted")
         return address
 
@@ -317,7 +320,7 @@ class PavelCore(gl.Contract):
         self.principals[gl.message.sender_address] = True
 
     @gl.public.write
-    def register_agent(self, agent_address: str, label: str) -> None:
+    def register_agent(self, agent_address: Address, label: str) -> None:
         caller = gl.message.sender_address
         self._require(caller in self.principals, "caller is not a registered principal")
         self._require(len(self.agents) < MAX_AGENTS or self._address(agent_address) in self.agents, "agent registry capacity reached")
@@ -331,7 +334,7 @@ class PavelCore(gl.Contract):
         self.agents[agent] = json.dumps({"principal": self._address_text(caller), "label": label, "active": True, "identity_fingerprint": self._canonical_hash(DOMAIN_IDENTITY, {"kind": "AGENT", "wallet": agent_text, "principal": self._address_text(caller), "label": label})}, sort_keys=True, separators=(",", ":"))
 
     @gl.public.write
-    def register_counterparty(self, bound_wallet: str, label: str, authority_origin: str) -> str:
+    def register_counterparty(self, bound_wallet: Address, label: str, authority_origin: str) -> str:
         caller = gl.message.sender_address
         self._require(caller in self.principals, "caller is not a registered principal")
         self._require(len(self.counterparty_identity_ids) < MAX_INTENTS, "counterparty identity capacity reached")
@@ -353,7 +356,7 @@ class PavelCore(gl.Contract):
         return self.counterparty_identities.get(identity_id, "")
 
     @gl.public.write
-    def set_vault_address(self, vault_address: str) -> None:
+    def set_vault_address(self, vault_address: Address) -> None:
         self._require(gl.message.sender_address == self.owner, "only Core owner may bind the Vault")
         self._require(not self.vault_bound, "Vault binding is immutable")
         vault = self._address(vault_address)
@@ -372,7 +375,7 @@ class PavelCore(gl.Contract):
     # ---------- mandate lifecycle ----------
 
     @gl.public.write
-    def create_mandate(self, authorized_agent: str, parent_mandate_id: str) -> str:
+    def create_mandate(self, authorized_agent: Address, parent_mandate_id: str) -> str:
         caller = gl.message.sender_address
         agent = self._address(authorized_agent)
         self._bounded(parent_mandate_id, u256(MAX_SHORT_TEXT), "parent mandate id")
@@ -638,7 +641,7 @@ class PavelCore(gl.Contract):
         self,
         mandate_id: str,
         counterparty: str,
-        recipient: str,
+        recipient: Address,
         amount: u256,
         title: str,
         purpose: str,

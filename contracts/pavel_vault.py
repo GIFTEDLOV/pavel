@@ -59,10 +59,13 @@ class PavelVault(gl.Contract):
     settlement_by_intent: TreeMap[str, str]
     history: DynArray[str]
 
-    def __init__(self, core_address: str):
+    def __init__(self, core_address: Address):
         self.owner = gl.message.sender_address
         self.binding_admin = gl.message.sender_address
-        core = Address(core_address)
+        # Stable Studionet decodes address constructor calldata before invoking
+        # the contract. Preserve an existing Address instead of attempting
+        # Address(Address(...)); the latter is a live deployment failure.
+        core = core_address if isinstance(core_address, Address) else Address(core_address)
         if core.as_hex.lower() == ZERO_ADDRESS:
             raise gl.vm.UserError("Core address cannot be zero")
         self.core_address = core
@@ -81,8 +84,10 @@ class PavelVault(gl.Contract):
     def _addr_text(self, address: Address) -> str:
         return address.as_hex.lower()
 
-    def _address(self, value: str) -> Address:
-        address = Address(value)
+    def _address(self, value) -> Address:
+        # Public address parameters and decoded stored values can be either the
+        # runtime Address object or a bounded hexadecimal string from JSON.
+        address = value if isinstance(value, Address) else Address(value)
         self._require(address.as_hex.lower() != ZERO_ADDRESS, "zero address is not permitted")
         return address
 
