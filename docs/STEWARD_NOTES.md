@@ -19,4 +19,6 @@ PAVEL addresses the recurring review failures explicitly:
   transaction persistence tests map these claims to code.
 
 The remaining live qualification dependency is secure operator signing for the
-corrected Vault. This is intentionally not bypassed.
+two binding writes and subsequent minimal lifecycle. The corrected pair is
+deployed and source-verified; this signing boundary is intentionally not
+bypassed.

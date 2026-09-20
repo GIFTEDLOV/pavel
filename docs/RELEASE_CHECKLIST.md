@@ -11,8 +11,8 @@ deployment. A qualification address is never silently promoted to production.
 - [ ] GenVM lint, validation, schema, typecheck, and Core/Vault interface parity pass.
 - [ ] Frontend tests, typecheck, lint, production build, and browser smoke pass.
 - [ ] Network guard, manifest validation, source hash gate, and secret scan pass.
-- [ ] Qualification-v2 Core and Vault both finalize with successful execution.
-- [ ] Exact deployed-source parity is established for both contracts.
+- [x] Qualification-v2 Core and Vault both finalize with successful execution.
+- [x] Exact deployed-source parity is established for both contracts.
 - [ ] One-time binding is verified bidirectionally.
 - [ ] Controlled Mandate, evidence, authorization, reservation, fulfillment, challenge, and settlement lifecycle passes.
 - [ ] External-message observation is reported honestly.

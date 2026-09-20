@@ -43,8 +43,17 @@ Readback proved the corrected Core owner is the qualification deployer and
 `get_vault_bound` method; an attempted call was rejected as an undefined
 method, so the zero-address read is the authoritative unbound indicator.
 
-Qualification-v2 is not complete: the corrected Vault has not been deployed,
-bound, funded, or exercised. The stable account is locked and requires the
-operator to run the exact CLI deployment command manually; no credential was
-requested or inspected. No canonical production deployment is authorized by
-this evidence.
+The corrected Vault is now finalized successfully at
+`0x14d101A283cE2C51E0A4306178BdB5353cD84922` from transaction
+`0xadf4ad220c4e87bdfe76fe76eca9695b8217b80b3c832e836f8602533d94b7cc`, nonce
+`170`, with five agreeing validators. Finalized-state `gen_getContractCode`
+retrieval produced 18,808 bytes with exact SHA-256
+`29fd8a384813617b7d37226438b5bb31429ad6e12e81a3ada210429cebf7a794`.
+`get_core_address()` returned the corrected Core exactly, proving the live
+Address-calldata constructor regression.
+
+The pair is deployed but unbound. Core still returns the zero Vault address.
+The next protected operations are `Vault.bind_core()` followed by
+`Core.set_vault_address(vault)`. The active account is locked; no credential
+was requested or inspected. No canonical production deployment is authorized
+by this evidence.

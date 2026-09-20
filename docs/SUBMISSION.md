@@ -11,5 +11,6 @@ explicitly authorized.
 - Explorer proof: `[explorer links - not yet available]`
 
 The qualification-v1 failure and qualification-v2 source-verification trail
-are retained locally under versioned artifacts. No address in those artifacts
-is a canonical production claim.
+are retained locally under versioned artifacts. Qualification-v2 Core and Vault
+are deployed but unbound; no address in those artifacts is a canonical
+production claim.
