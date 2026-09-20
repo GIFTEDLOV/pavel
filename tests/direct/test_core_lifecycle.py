@@ -89,3 +89,36 @@ def test_transaction_datetime_uses_message_context_and_rejects_malformed_zone(di
     core.register_agent(address_text(direct_alice), "agent")
     with direct_vm.expect_revert("malformed transaction timezone"):
         core.create_mandate(address_text(direct_alice), "")
+
+
+@pytest.mark.direct
+def test_unassessed_and_evidence_ready_views_never_look_authorized(direct_vm, direct_deploy, direct_owner, direct_alice):
+    direct_vm.warp(BASE_TIME)
+    core = direct_deploy("contracts/pavel_core.py")
+    mandate_id = configure_and_seal_core(core, direct_vm, direct_owner, direct_alice)
+    intent_id = create_submitted_intent(core, direct_vm, direct_owner, direct_alice, mandate_id)
+    assert json.loads(core.get_intent(intent_id))["status"] == "SUBMITTED"
+    with direct_vm.expect_revert("intent has no authorization record"):
+        core.get_authorization_for_vault(intent_id)
+    add_evidence(core, direct_vm, direct_alice, intent_id)
+    direct_vm.mock_web(r"evidence\.example/quote", {"status": 200, "body": "Provider: Atlas GPU\nAmount: 3 GEN"})
+    core.stage_evidence(intent_id)
+    assert json.loads(core.get_intent(intent_id))["status"] == "EVIDENCE_READY"
+    with direct_vm.expect_revert("intent has no authorization record"):
+        core.get_authorization_for_vault(intent_id)
+
+
+@pytest.mark.direct
+def test_authorized_view_requires_explicit_consensus_result(direct_vm, direct_deploy, direct_owner, direct_alice):
+    direct_vm.warp(BASE_TIME)
+    core = direct_deploy("contracts/pavel_core.py")
+    mandate_id = configure_and_seal_core(core, direct_vm, direct_owner, direct_alice)
+    intent_id = create_submitted_intent(core, direct_vm, direct_owner, direct_alice, mandate_id)
+    add_evidence(core, direct_vm, direct_alice, intent_id)
+    direct_vm.mock_web(r"evidence\.example/quote", {"status": 200, "body": "Provider: Atlas GPU\nAmount: 3 GEN"})
+    core.stage_evidence(intent_id)
+    result = {"schema": "pavel-authorization-v1", "explanation": "bounded", "purpose_aligned": True, "activity_permitted": True, "prohibited_activity_absent": True, "counterparty_scope_satisfied": True, "deliverable_in_scope": True, "commercial_terms_consistent": True, "evidence_semantically_sufficient": True, "duplicate_semantic_purchase_absent": True, "authority_scope_preserved": True, "fulfillment_terms_defined": True, "external_dependencies_disclosed": True, "constitution_satisfied": True}
+    direct_vm.mock_llm(r"pavel-authorization-v1", json.dumps(result))
+    core.authorize_intent(intent_id)
+    assert json.loads(core.get_intent(intent_id))["status"] == "AUTHORIZED"
+    assert json.loads(core.get_authorization_for_vault(intent_id))["status"] == "AUTHORIZED"

@@ -217,12 +217,13 @@ class PavelVault(gl.Contract):
         mandate_id = auth["mandate_id"]
         self._require(self.available_by_mandate[mandate_id] >= amount, "insufficient available balance")
         epoch_start = self.epoch_start_by_mandate[mandate_id]
+        epoch_spent = self.epoch_spent_by_mandate[mandate_id]
         epoch_duration = u256(int(auth["epoch_duration_seconds"]))
         if now["seconds"] >= epoch_start + epoch_duration:
-            self.epoch_start_by_mandate[mandate_id] = now["seconds"]
-            self.epoch_spent_by_mandate[mandate_id] = u256(0)
+            epoch_start = now["seconds"]
+            epoch_spent = u256(0)
         self._require(self.committed_by_mandate[mandate_id] + amount <= u256(int(auth["total_budget"])), "reservation exceeds total mandate budget")
-        self._require(self.epoch_spent_by_mandate[mandate_id] + amount <= u256(int(auth["epoch_budget"])), "reservation exceeds epoch budget")
+        self._require(epoch_spent + amount <= u256(int(auth["epoch_budget"])), "reservation exceeds epoch budget")
         self._require(len(self.reservation_ids) < MAX_RESERVATIONS, "reservation capacity reached")
         reservation = {
             "intent_id": intent_id,
@@ -240,10 +241,11 @@ class PavelVault(gl.Contract):
         self._put(self.reservations, intent_id, reservation)
         self.reservation_ids.append(intent_id)
         self.settlement_by_intent[intent_id] = ""
+        self.epoch_start_by_mandate[mandate_id] = epoch_start
         self.available_by_mandate[mandate_id] = self.available_by_mandate[mandate_id] - amount
         self.reserved_by_mandate[mandate_id] = self.reserved_by_mandate[mandate_id] + amount
         self.committed_by_mandate[mandate_id] = self.committed_by_mandate[mandate_id] + amount
-        self.epoch_spent_by_mandate[mandate_id] = self.epoch_spent_by_mandate[mandate_id] + amount
+        self.epoch_spent_by_mandate[mandate_id] = epoch_spent + amount
         self.total_available = self.total_available - amount
         self.total_reserved = self.total_reserved + amount
         self._require(self._accounting_conserved(mandate_id), "reservation would violate conservation")

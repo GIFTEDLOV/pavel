@@ -28,13 +28,18 @@ MAX_TEXT = 4096
 MAX_SHORT_TEXT = 256
 MAX_URL = 512
 MAX_EVIDENCE = 8
-MAX_SNAPSHOTS_PER_INTENT = 4
+MAX_SNAPSHOTS_PER_INTENT = 32
 MAX_HISTORY = 4096
 MAX_INTENTS = 4096
 MAX_MANDATES = 1024
 MAX_AGENTS = 1024
 MAX_DISPUTES = 2048
-MAX_CHALLENGES_PER_INTENT = 16
+# Challenge storage and security-critical qualifying capacity are separate.
+# Unqualified submissions cannot consume the qualifying set, but storage is
+# still bounded to make the residual Sybil limitation explicit and auditable.
+MAX_CHALLENGE_RECORDS_PER_INTENT = 64
+MAX_QUALIFYING_CHALLENGES_PER_INTENT = 16
+CHALLENGE_REVIEW_GRACE_SECONDS = 3600
 MAX_SOURCE_BYTES = 8192
 MAX_EXCERPT = 2048
 
@@ -120,6 +125,7 @@ class PavelCore(gl.Contract):
     dispute_ids: DynArray[str]
     challenge_index: TreeMap[str, str]
     challenge_count: TreeMap[str, u256]
+    qualifying_challenge_count: TreeMap[str, u256]
     challenge_evidence_index: TreeMap[str, str]
     challenge_evidence_count: TreeMap[str, u256]
     history: DynArray[str]
@@ -244,6 +250,12 @@ class PavelCore(gl.Contract):
     def _valid_evidence_kind(self, kind: str) -> bool:
         return kind in ("COUNTERPARTY", "PRODUCT_SERVICE", "QUOTE", "INVOICE", "COMMERCIAL_TERMS", "AUTHORITY", "FULFILLMENT", "CHALLENGE", "RESPONSE", "OTHER_ALLOWED_POLICY_KIND")
 
+    def _evidence_identity_fingerprint(self, definition) -> str:
+        return self._canonical_hash(DOMAIN_EVIDENCE, {"evidence_id": definition["evidence_id"], "mandate_id": definition["mandate_id"], "intent_id": definition["intent_id"], "challenge_id": definition.get("challenge_id", ""), "evidence_kind": definition["evidence_kind"], "origin_url": definition["origin_url"], "expected_authority": definition["expected_authority"], "committed_sha256": definition.get("committed_sha256", definition.get("expected_hash", "")), "committed_byte_length": definition.get("committed_byte_length", "0"), "policy_fingerprint": definition["policy_fingerprint"], "sequence": definition["sequence"]})
+
+    def _require_evidence_identity(self, definition) -> None:
+        self._require(definition.get("identity_fingerprint", "") == self._evidence_identity_fingerprint(definition), "committed evidence identity is inconsistent")
+
     def _authority_allowed(self, mandate, authority: str) -> bool:
         constraints = mandate.get("authority_constraints", "")
         for candidate in constraints.split(","):
@@ -254,6 +266,23 @@ class PavelCore(gl.Contract):
     def _record(self, table, key: str):
         self._require(key in table, "record does not exist")
         return json.loads(table[key])
+
+    def _challenge_grace_expired(self, dispute, now_seconds: u256) -> bool:
+        return now_seconds > u256(int(dispute["deadline"])) + u256(CHALLENGE_REVIEW_GRACE_SECONDS)
+
+    def _challenge_is_blocking(self, dispute, now_seconds: u256) -> bool:
+        if dispute["status"] not in ("QUALIFYING", "ASSESSMENT_PENDING", "ASSESSMENT_RETRY_REQUIRED"):
+            return False
+        return not self._challenge_grace_expired(dispute, now_seconds)
+
+    def _refresh_intent_challenge_state(self, item) -> None:
+        now_seconds = self._now()["seconds"]
+        if self._oldest_open_challenge(item["intent_id"], now_seconds) != "":
+            item["status"] = "DISPUTED"
+        elif item.get("challenge_decision_id", "") != "":
+            item["status"] = "ADJUDICATED_RELEASE" if item["settlement_direction"] == "RELEASE_TO_COUNTERPARTY" else "ADJUDICATED_REFUND"
+        else:
+            item["status"] = item.get("pre_challenge_status", "") or "FULFILLED"
 
     def _put_record(self, table, key: str, value) -> None:
         table[key] = json.dumps(value, sort_keys=True, separators=(",", ":"))
@@ -467,7 +496,21 @@ class PavelCore(gl.Contract):
         if isinstance(raw, dict):
             return raw
         if isinstance(raw, str):
-            return json.loads(raw)
+            self._require(len(raw) <= MAX_SOURCE_BYTES, "semantic reviewer response exceeds the protocol bound")
+            duplicate = [False]
+
+            def object_pairs_hook(pairs):
+                result = {}
+                for key, value in pairs:
+                    if key in result:
+                        duplicate[0] = True
+                    result[key] = value
+                return result
+
+            parsed = json.loads(raw, object_pairs_hook=object_pairs_hook)
+            self._require(not duplicate[0], "semantic reviewer response contains duplicate keys")
+            self._require(isinstance(parsed, dict), "semantic reviewer response must be an object")
+            return parsed
         raise gl.vm.UserError("semantic reviewer returned a non-object")
 
     @gl.public.write
@@ -650,6 +693,7 @@ class PavelCore(gl.Contract):
             "current_snapshot_id": "",
             "evidence_set_identity": "",
             "challenge_decision_id": "",
+            "pre_challenge_status": "",
             "last_error": "",
         }
         self._put_record(self.intents, intent_id, item)
@@ -728,6 +772,7 @@ class PavelCore(gl.Contract):
             "policy_fingerprint": item["intent_fingerprint"],
             "created_at": self._timestamp(),
         }
+        definition["identity_fingerprint"] = self._evidence_identity_fingerprint(definition)
         self._put_record(self.evidence_defs, evidence_id, definition)
         self.evidence_index[intent_id + "|" + str(sequence)] = evidence_id
         self.evidence_captured[evidence_id] = False
@@ -750,8 +795,9 @@ class PavelCore(gl.Contract):
     ) -> str:
         challenge = self._record(self.disputes, challenge_id)
         item = self._record(self.intents, challenge["intent_id"])
-        self._require(challenge["status"] in ("OPEN", "EVIDENCE_RETRY_REQUIRED", "EVIDENCE_RECOVERY_REQUIRED", "EVIDENCE_REPAIR_REQUIRED"), "challenge is not accepting evidence")
+        self._require(challenge["status"] in ("SUBMITTED", "EVIDENCE_PENDING"), "challenge is not accepting evidence")
         self._require(challenge["challenger"] == self._address_text(gl.message.sender_address), "only the challenger may define challenge evidence")
+        self._require(self._now()["seconds"] <= u256(int(challenge["deadline"])), "challenge evidence intake window has closed")
         self._require(evidence_kind in ("CHALLENGE", "RESPONSE"), "challenge evidence kind is invalid")
         mandate = self._record(self.mandates, item["mandate_id"])
         host = self._url_host(origin_url)
@@ -770,6 +816,7 @@ class PavelCore(gl.Contract):
         evidence_id = "E-" + str(self.next_evidence_id)
         self.next_evidence_id = self.next_evidence_id + u256(1)
         definition = {"evidence_id": evidence_id, "mandate_id": item["mandate_id"], "intent_id": challenge["intent_id"], "evidence_kind": evidence_kind, "origin_url": origin_url, "expected_authority": expected_authority, "expected_hash": expected_hash, "committed_sha256": expected_hash, "committed_byte_length": str(committed_byte_length), "approved_recovery_authority": approved_recovery_authority, "challenge_id": challenge_id, "sequence": str(sequence), "policy_fingerprint": challenge["fingerprint"], "created_at": self._timestamp()}
+        definition["identity_fingerprint"] = self._evidence_identity_fingerprint(definition)
         self._put_record(self.evidence_defs, evidence_id, definition)
         self.challenge_evidence_index[challenge_id + "|" + str(sequence)] = evidence_id
         self.challenge_evidence_count[challenge_id] = count + u256(1)
@@ -779,6 +826,7 @@ class PavelCore(gl.Contract):
         challenge["evidence_ids"] = evidence_id if challenge["evidence_ids"] == "" else challenge["evidence_ids"] + "," + evidence_id
         self._bounded(challenge["evidence_ids"], u256(MAX_SHORT_TEXT), "challenge evidence IDs")
         challenge["evidence_ids_hash"] = self._canonical_hash(DOMAIN_DISPUTE, {"challenge_id": challenge_id, "count": str(count + u256(1)), "last_evidence_id": evidence_id})
+        challenge["status"] = "EVIDENCE_PENDING"
         self._put_record(self.disputes, challenge_id, challenge)
         return evidence_id
 
@@ -871,6 +919,7 @@ class PavelCore(gl.Contract):
         item = self._record(self.intents, intent_id)
         definition = self._record(self.evidence_defs, evidence_id)
         self._require(definition["intent_id"] == intent_id, "evidence does not belong to intent")
+        self._require_evidence_identity(definition)
         self._require(not self.evidence_captured.get(evidence_id, False), "captured evidence identity cannot be recovered")
         challenge_id = definition.get("challenge_id", "")
         if challenge_id == "":
@@ -878,23 +927,32 @@ class PavelCore(gl.Contract):
             self._require(self._address_text(gl.message.sender_address) in (item["agent"], item["principal"]), "caller cannot configure evidence recovery")
         else:
             challenge = self._record(self.disputes, challenge_id)
-            self._require(challenge["status"] in ("EVIDENCE_RETRY_REQUIRED", "EVIDENCE_RECOVERY_REQUIRED", "EVIDENCE_REPAIR_REQUIRED"), "challenge is not awaiting evidence recovery")
+            self._require(definition.get("challenge_id", "") == challenge_id, "challenge evidence does not belong to challenge")
+            self._require(challenge["status"] in ("EVIDENCE_RETRY_REQUIRED",), "challenge is not awaiting evidence recovery")
             self._require(challenge["challenger"] == self._address_text(gl.message.sender_address), "only the challenger may configure recovery")
         self._require(definition.get("committed_sha256", "") != "" and definition.get("committed_byte_length", "0") != "0", "recovery requires a committed evidence identity")
         host = self._url_host(recovery_url)
         self._require(host == definition["approved_recovery_authority"], "recovery transport authority is not approved")
         self._require(recovery_url != definition["origin_url"], "recovery transport must be alternate")
         self._require(not self.evidence_recovery_used.get(evidence_id, False), "recovery transport has already been consumed")
+        self._require(self.evidence_recovery_url.get(evidence_id, "") == "", "recovery transport is already configured")
         self.evidence_recovery_url[evidence_id] = recovery_url
-        item["status"] = "EVIDENCE_RECOVERY_REQUIRED"
-        item["last_error"] = "APPROVED_ALTERNATE_TRANSPORT_CONFIGURED"
-        self._put_record(self.intents, intent_id, item)
+        if challenge_id == "":
+            item["status"] = "EVIDENCE_RECOVERY_REQUIRED"
+            item["last_error"] = "APPROVED_ALTERNATE_TRANSPORT_CONFIGURED"
+            self._put_record(self.intents, intent_id, item)
+        else:
+            challenge["status"] = "EVIDENCE_RETRY_REQUIRED"
+            challenge["last_error"] = "APPROVED_ALTERNATE_TRANSPORT_CONFIGURED"
+            self._put_record(self.disputes, challenge_id, challenge)
 
     def _evidence_set_identity(self, item, mandate) -> str:
         identities = []
         count = self.evidence_count.get(item["intent_id"], u256(0))
         for i in range(int(count)):
             definition = self._record(self.evidence_defs, self.evidence_index[item["intent_id"] + "|" + str(i)])
+            self._require_evidence_identity(definition)
+            self._require(definition["mandate_id"] == item["mandate_id"] and definition["intent_id"] == item["intent_id"] and definition["policy_fingerprint"] == item["intent_fingerprint"], "evidence definition is not bound to the frozen Intent")
             identities.append({"evidence_id": definition["evidence_id"], "kind": definition["evidence_kind"], "mandate_id": definition["mandate_id"], "intent_id": definition["intent_id"], "sha256": definition.get("committed_sha256", ""), "byte_length": definition.get("committed_byte_length", "0"), "authority": definition["expected_authority"], "policy_fingerprint": definition["policy_fingerprint"], "sequence": definition["sequence"]})
         return self._canonical_hash(DOMAIN_EVIDENCE_SET, {"mandate_fingerprint": mandate["definition_hash"], "intent_id": item["intent_id"], "intent_fingerprint": item["intent_fingerprint"], "definitions": identities, "policy_version": "1"})
 
@@ -908,8 +966,10 @@ class PavelCore(gl.Contract):
             evidence_id = self.evidence_index[intent_id + "|" + str(i)]
             if not self.evidence_captured.get(evidence_id, False):
                 definition = self._record(self.evidence_defs, evidence_id)
+                self._require_evidence_identity(definition)
+                self._require(definition["mandate_id"] == item["mandate_id"] and definition["intent_id"] == item["intent_id"] and definition["policy_fingerprint"] == item["intent_fingerprint"], "evidence definition is not bound to the frozen Intent")
                 recovery_url = self.evidence_recovery_url.get(evidence_id, "")
-                if recovery_url != "":
+                if recovery_url != "" and not self.evidence_recovery_used.get(evidence_id, False):
                     definition["transport_url"] = recovery_url
                     self.evidence_recovery_used[evidence_id] = True
                 definitions.append(definition)
@@ -1191,7 +1251,12 @@ class PavelCore(gl.Contract):
         self._require(now["seconds"] <= u256(int(item["challenge_deadline"])), "challenge window has closed")
         self._require(len(self.dispute_ids) < MAX_DISPUTES, "dispute capacity reached")
         current_count = self.challenge_count.get(intent_id, u256(0))
-        self._require(current_count < MAX_CHALLENGES_PER_INTENT, "per-intent challenge capacity reached")
+        self._require(current_count < u256(MAX_CHALLENGE_RECORDS_PER_INTENT), "per-intent challenge record capacity reached")
+        submission_fingerprint = self._canonical_hash(DOMAIN_DISPUTE, {"intent_id": intent_id, "challenger": caller, "reason": reason})
+        for i in range(int(current_count)):
+            existing = self._record(self.disputes, self.challenge_index[intent_id + "|" + str(i)])
+            self._require(existing.get("submission_fingerprint", "") != submission_fingerprint, "identical challenge already submitted")
+            self._require(not (existing["challenger"] == caller and self._challenge_has_unresolved_submission(existing)), "challenger already has an unresolved challenge")
         dispute_id = "D-" + str(self.next_dispute_id)
         self.next_dispute_id = self.next_dispute_id + u256(1)
         dispute = {
@@ -1204,56 +1269,95 @@ class PavelCore(gl.Contract):
             "deadline": item["challenge_deadline"],
             "original_fulfillment": item["fulfillment"],
             "original_snapshot_id": item["current_snapshot_id"],
-            "status": "OPEN",
+            "base_intent_status": item.get("pre_challenge_status", "") if item["status"] == "DISPUTED" else item["status"],
+            "status": "SUBMITTED",
             "adjudication": "",
             "evidence_ids": "",
             "evidence_ids_hash": "",
             "independent_snapshot_id": "",
             "evidence_set_identity": "",
             "resolved_at": "",
-            "fingerprint": self._canonical_hash(DOMAIN_DISPUTE, {"id": dispute_id, "intent": intent_id, "challenger": caller, "original": item["fulfillment"], "opened_at": now["iso"], "deadline": item["challenge_deadline"]}),
+            "last_error": "",
+            "submission_fingerprint": submission_fingerprint,
+            "fingerprint": self._canonical_hash(DOMAIN_DISPUTE, {"id": dispute_id, "intent": intent_id, "challenger": caller, "original": item["fulfillment"], "opened_at": now["iso"], "deadline": item["challenge_deadline"], "submission_fingerprint": submission_fingerprint}),
         }
         self._put_record(self.disputes, dispute_id, dispute)
         self.dispute_ids.append(dispute_id)
         self.challenge_index[intent_id + "|" + str(current_count)] = dispute_id
         self.challenge_count[intent_id] = current_count + u256(1)
+        self.qualifying_challenge_count[intent_id] = self.qualifying_challenge_count.get(intent_id, u256(0))
         self.challenge_evidence_count[dispute_id] = u256(0)
-        item["status"] = "DISPUTED"
-        self._put_record(self.intents, intent_id, item)
-        self._history("CHALLENGE_OPENED", dispute_id, dispute["fingerprint"])
+        self._history("CHALLENGE_SUBMITTED", dispute_id, dispute["fingerprint"])
         return dispute_id
 
-    def _challenge_is_unresolved(self, dispute) -> bool:
-        return dispute["status"] in ("OPEN", "EVIDENCE_READY", "EVIDENCE_RETRY_REQUIRED", "EVIDENCE_RECOVERY_REQUIRED", "EVIDENCE_REPAIR_REQUIRED", "RETRY_REQUIRED")
+    def _challenge_is_unresolved(self, dispute, now_seconds: u256) -> bool:
+        return self._challenge_is_blocking(dispute, now_seconds)
 
-    def _oldest_open_challenge(self, intent_id: str) -> str:
+    def _challenge_has_unresolved_submission(self, dispute) -> bool:
+        return dispute["status"] not in ("RESOLVED", "EXPIRED", "INADMISSIBLE")
+
+    def _oldest_open_challenge(self, intent_id: str, now_seconds: u256) -> str:
         count = self.challenge_count.get(intent_id, u256(0))
         for i in range(int(count)):
             challenge_id = self.challenge_index[intent_id + "|" + str(i)]
             dispute = self._record(self.disputes, challenge_id)
-            if self._challenge_is_unresolved(dispute):
+            if self._challenge_is_unresolved(dispute, now_seconds):
                 return challenge_id
         return ""
 
-    def _has_open_challenges(self, intent_id: str) -> bool:
-        return self._oldest_open_challenge(intent_id) != ""
+    def _has_open_challenges(self, intent_id: str, now_seconds: u256) -> bool:
+        return self._oldest_open_challenge(intent_id, now_seconds) != ""
+
+    @gl.public.write
+    def expire_challenge(self, challenge_id: str) -> None:
+        challenge = self._record(self.disputes, challenge_id)
+        item = self._record(self.intents, challenge["intent_id"])
+        now = self._now()
+        self._require(challenge["status"] in ("SUBMITTED", "EVIDENCE_PENDING", "EVIDENCE_RETRY_REQUIRED", "QUALIFYING", "ASSESSMENT_PENDING", "ASSESSMENT_RETRY_REQUIRED"), "challenge is not expirable")
+        self._require(self._challenge_grace_expired(challenge, now["seconds"]), "challenge review grace period is still open")
+        was_qualifying = challenge["status"] in ("QUALIFYING", "ASSESSMENT_PENDING", "ASSESSMENT_RETRY_REQUIRED")
+        challenge["status"] = "EXPIRED"
+        challenge["resolved_at"] = now["iso"]
+        challenge["last_error"] = "CHALLENGE_REVIEW_GRACE_EXPIRED"
+        self._put_record(self.disputes, challenge_id, challenge)
+        if was_qualifying:
+            active = self.qualifying_challenge_count.get(challenge["intent_id"], u256(0))
+            self.qualifying_challenge_count[challenge["intent_id"]] = active - u256(1) if active > 0 else u256(0)
+        self._refresh_intent_challenge_state(item)
+        self._put_record(self.intents, challenge["intent_id"], item)
+        self._history("CHALLENGE_EXPIRED", challenge_id, challenge["fingerprint"])
+
+    def _challenge_set_identity(self, item, mandate, captures) -> str:
+        evidence = []
+        for capture in captures:
+            definition = self._record(self.evidence_defs, capture["evidence_id"])
+            evidence.append({"kind": definition["evidence_kind"], "sha256": capture["sha256"], "byte_length": capture["byte_length"], "authority": definition["expected_authority"], "sequence": capture["sequence"]})
+        return self._canonical_hash(DOMAIN_EVIDENCE_SET, {"mandate_fingerprint": mandate["definition_hash"], "intent_id": item["intent_id"], "evidence": evidence, "policy_version": "1"})
 
     @gl.public.write
     def stage_challenge_evidence(self, challenge_id: str) -> None:
         challenge = self._record(self.disputes, challenge_id)
         item = self._record(self.intents, challenge["intent_id"])
+        now = self._now()
+        self._require(challenge["status"] in ("EVIDENCE_PENDING", "EVIDENCE_RETRY_REQUIRED"), "challenge evidence is not pending")
+        self._require(now["seconds"] <= u256(int(challenge["deadline"])) + u256(CHALLENGE_REVIEW_GRACE_SECONDS), "challenge evidence grace period has closed")
         count = self.challenge_evidence_count.get(challenge_id, u256(0))
         self._require(count > 0, "at least one challenge evidence definition is required")
         definitions = []
+        has_challenge_evidence = False
         for i in range(int(count)):
             evidence_id = self.challenge_evidence_index[challenge_id + "|" + str(i)]
+            definition = self._record(self.evidence_defs, evidence_id)
+            self._require_evidence_identity(definition)
+            self._require(definition["mandate_id"] == item["mandate_id"] and definition["intent_id"] == item["intent_id"] and definition.get("challenge_id", "") == challenge_id and definition["policy_fingerprint"] == challenge["fingerprint"], "challenge evidence identity is not bound to this challenge")
+            has_challenge_evidence = has_challenge_evidence or definition["evidence_kind"] == "CHALLENGE"
             if not self.evidence_captured.get(evidence_id, False):
-                definition = self._record(self.evidence_defs, evidence_id)
                 recovery_url = self.evidence_recovery_url.get(evidence_id, "")
                 if recovery_url != "":
                     definition["transport_url"] = recovery_url
                     self.evidence_recovery_used[evidence_id] = True
                 definitions.append(definition)
+        self._require(has_challenge_evidence, "at least one CHALLENGE evidence item is required")
         self._require(len(definitions) > 0, "no uncaptured challenge evidence remains")
         captured_at = self._timestamp()
 
@@ -1272,6 +1376,7 @@ class PavelCore(gl.Contract):
         try:
             captures = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
         except Exception:
+            challenge["last_error"] = "VALIDATOR_DISAGREEMENT_OR_INFRASTRUCTURE_FAILURE"
             challenge["status"] = "EVIDENCE_RETRY_REQUIRED"
             self._put_record(self.disputes, challenge_id, challenge)
             return
@@ -1283,7 +1388,8 @@ class PavelCore(gl.Contract):
             retryable = retryable or capture["capture_class"] == "INFRASTRUCTURE_FAILURE"
         if not all_authenticated:
             recovery_in_flight = any(capture["transport_url"] != capture["url"] for capture in captures)
-            challenge["status"] = "EVIDENCE_RECOVERY_REQUIRED" if recovery_in_flight and retryable else ("EVIDENCE_RETRY_REQUIRED" if retryable else "EVIDENCE_REPAIR_REQUIRED")
+            challenge["status"] = "EVIDENCE_RETRY_REQUIRED" if retryable or recovery_in_flight else "INADMISSIBLE"
+            challenge["last_error"] = "INFRASTRUCTURE_FAILURE" if retryable else "MALFORMED_EVIDENCE"
             self._put_record(self.disputes, challenge_id, challenge)
             return
         for capture in captures:
@@ -1296,7 +1402,23 @@ class PavelCore(gl.Contract):
                 definition["expected_hash"] = capture["sha256"]
                 self._put_record(self.evidence_defs, capture["evidence_id"], definition)
         mandate = self._record(self.mandates, item["mandate_id"])
-        challenge_set_identity = self._canonical_hash(DOMAIN_EVIDENCE_SET, {"mandate_fingerprint": mandate["definition_hash"], "intent_id": item["intent_id"], "challenge_id": challenge_id, "evidence": [{"evidence_id": x["evidence_id"], "kind": self._record(self.evidence_defs, x["evidence_id"])["evidence_kind"], "sha256": x["sha256"], "byte_length": x["byte_length"], "authority": self._record(self.evidence_defs, x["evidence_id"])["expected_authority"], "sequence": x["sequence"]} for x in captures], "policy_version": "1"})
+        challenge_set_identity = self._challenge_set_identity(item, mandate, captures)
+        for i in range(int(self.challenge_count.get(item["intent_id"], u256(0)))):
+            other_id = self.challenge_index[item["intent_id"] + "|" + str(i)]
+            if other_id == challenge_id:
+                continue
+            other = self._record(self.disputes, other_id)
+            if other.get("evidence_set_identity", "") == challenge_set_identity and other.get("status", "") in ("QUALIFYING", "ASSESSMENT_PENDING", "ASSESSMENT_RETRY_REQUIRED", "RESOLVED"):
+                challenge["status"] = "INADMISSIBLE"
+                challenge["last_error"] = "EVIDENCE_SET_REPLAY"
+                self._put_record(self.disputes, challenge_id, challenge)
+                return
+            if other["challenger"] == challenge["challenger"] and self._challenge_is_blocking(other, now["seconds"]):
+                challenge["status"] = "INADMISSIBLE"
+                challenge["last_error"] = "CHALLENGER_QUALIFYING_CAPACITY"
+                self._put_record(self.disputes, challenge_id, challenge)
+                return
+        self._require(self.qualifying_challenge_count.get(item["intent_id"], u256(0)) < u256(MAX_QUALIFYING_CHALLENGES_PER_INTENT), "qualifying challenge capacity reached")
         snapshot_count = self.snapshot_count.get(item["intent_id"], u256(0))
         self._require(snapshot_count < MAX_SNAPSHOTS_PER_INTENT, "snapshot capacity reached")
         snapshot_id = "S-" + str(self.next_snapshot_id)
@@ -1308,7 +1430,13 @@ class PavelCore(gl.Contract):
         self.snapshot_count[item["intent_id"]] = snapshot_count + u256(1)
         challenge["independent_snapshot_id"] = snapshot_id
         challenge["evidence_set_identity"] = challenge_set_identity
-        challenge["status"] = "EVIDENCE_READY"
+        challenge["status"] = "QUALIFYING"
+        challenge["last_error"] = ""
+        self.qualifying_challenge_count[item["intent_id"]] = self.qualifying_challenge_count.get(item["intent_id"], u256(0)) + u256(1)
+        item["status"] = "DISPUTED"
+        if item.get("pre_challenge_status", "") == "":
+            item["pre_challenge_status"] = challenge["base_intent_status"]
+        self._put_record(self.intents, item["intent_id"], item)
         self._put_record(self.disputes, challenge_id, challenge)
         self._history("CHALLENGE_EVIDENCE_SNAPSHOT_AUTHENTICATED", snapshot_id, snapshot_fingerprint)
 
@@ -1328,10 +1456,13 @@ class PavelCore(gl.Contract):
     def adjudicate_dispute(self, dispute_id: str) -> None:
         dispute = self._record(self.disputes, dispute_id)
         item = self._record(self.intents, dispute["intent_id"])
-        self._require(dispute["status"] == "EVIDENCE_READY", "challenge evidence is not ready")
+        now_seconds = self._now()["seconds"]
+        self._require(dispute["status"] in ("QUALIFYING", "ASSESSMENT_RETRY_REQUIRED"), "challenge is not qualifying for assessment")
         self._require(item["status"] == "DISPUTED", "intent is not disputed")
-        self._require(self._oldest_open_challenge(dispute["intent_id"]) == dispute_id, "challenges are adjudicated oldest-first")
+        self._require(self._oldest_open_challenge(dispute["intent_id"], now_seconds) == dispute_id, "challenges are adjudicated oldest-first")
         self._require(dispute["independent_snapshot_id"] != "", "independent challenge snapshot is required")
+        dispute["status"] = "ASSESSMENT_PENDING"
+        self._put_record(self.disputes, dispute_id, dispute)
         mandate = self._record(self.mandates, item["mandate_id"])
         challenge_snapshot = self._record(self.snapshots, dispute["independent_snapshot_id"])
         context = ""
@@ -1360,32 +1491,39 @@ class PavelCore(gl.Contract):
         try:
             result = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
         except Exception:
-            dispute["status"] = "RETRY_REQUIRED"
+            dispute["status"] = "ASSESSMENT_RETRY_REQUIRED"
+            dispute["last_error"] = "VALIDATOR_DISAGREEMENT_OR_INFRASTRUCTURE_FAILURE"
             self._put_record(self.disputes, dispute_id, dispute)
             return
-        self._require(self._dispute_valid(result), "malformed dispute vector")
+        if not self._dispute_valid(result):
+            dispute["status"] = "ASSESSMENT_RETRY_REQUIRED"
+            dispute["last_error"] = "MALFORMED_SEMANTIC_RESULT"
+            self._put_record(self.disputes, dispute_id, dispute)
+            return
         dispute["adjudication"] = json.dumps({"schema": "pavel-dispute-v1", "vector": result, "reviewed_at": self._timestamp(), "original_snapshot_id": dispute["original_snapshot_id"], "independent_snapshot_id": dispute["independent_snapshot_id"], "challenge_id": dispute_id}, sort_keys=True, separators=(",", ":"))
         if result["outcome"] == "INDETERMINATE_RETRY":
-            dispute["status"] = "RETRY_REQUIRED"
+            dispute["status"] = "ASSESSMENT_RETRY_REQUIRED"
+            dispute["last_error"] = "INDETERMINATE_SEMANTIC_RESULT"
         elif result["outcome"] == "RELEASE_TO_COUNTERPARTY":
-            dispute["status"] = "ADJUDICATED_RELEASE"
+            dispute["status"] = "RESOLVED"
+            dispute["resolution"] = "RELEASE_TO_COUNTERPARTY"
         else:
-            dispute["status"] = "ADJUDICATED_REFUND"
-        if dispute["status"] != "RETRY_REQUIRED":
+            dispute["status"] = "RESOLVED"
+            dispute["resolution"] = "REFUND_TO_PRINCIPAL"
+        if dispute["status"] == "RESOLVED":
             dispute["resolved_at"] = self._timestamp()
+            active = self.qualifying_challenge_count.get(dispute["intent_id"], u256(0))
+            self.qualifying_challenge_count[dispute["intent_id"]] = active - u256(1) if active > 0 else u256(0)
         self._put_record(self.disputes, dispute_id, dispute)
-        if dispute["status"] == "ADJUDICATED_RELEASE":
+        if dispute.get("resolution", "") == "RELEASE_TO_COUNTERPARTY":
             if item["challenge_decision_id"] == "":
                 item["challenge_decision_id"] = dispute_id
                 item["settlement_direction"] = "RELEASE_TO_COUNTERPARTY"
-        elif dispute["status"] == "ADJUDICATED_REFUND":
+        elif dispute.get("resolution", "") == "REFUND_TO_PRINCIPAL":
             if item["challenge_decision_id"] == "":
                 item["challenge_decision_id"] = dispute_id
                 item["settlement_direction"] = "REFUND_TO_PRINCIPAL"
-        if dispute["status"] in ("ADJUDICATED_RELEASE", "ADJUDICATED_REFUND") and not self._has_open_challenges(dispute["intent_id"]):
-            item["status"] = "ADJUDICATED_RELEASE" if item["settlement_direction"] == "RELEASE_TO_COUNTERPARTY" else "ADJUDICATED_REFUND"
-        else:
-            item["status"] = "DISPUTED"
+        self._refresh_intent_challenge_state(item)
         self._put_record(self.intents, dispute["intent_id"], item)
         self._history("CHALLENGE_ADJUDICATED", dispute_id, dispute["fingerprint"])
 
@@ -1435,8 +1573,16 @@ class PavelCore(gl.Contract):
     @gl.public.view
     def get_settlement_instruction(self, intent_id: str) -> str:
         item = self._record(self.intents, intent_id)
-        blocked = self._has_open_challenges(intent_id)
-        return json.dumps({"intent_id": intent_id, "mandate_id": item["mandate_id"], "status": "CHALLENGE_BLOCKED" if blocked else item["status"], "direction": "" if blocked else item["settlement_direction"], "oldest_open_challenge": self._oldest_open_challenge(intent_id), "ready_at": item["settlement_ready_at"], "challenge_deadline": item["challenge_deadline"], "recipient": item["recipient"], "principal": item["principal"], "amount": item["amount"], "intent_fingerprint": item["intent_fingerprint"]}, sort_keys=True, separators=(",", ":"))
+        now_seconds = self._now()["seconds"]
+        oldest = self._oldest_open_challenge(intent_id, now_seconds)
+        blocked = oldest != ""
+        effective_status = item["status"]
+        if not blocked and effective_status == "DISPUTED":
+            if item.get("challenge_decision_id", "") != "":
+                effective_status = "ADJUDICATED_RELEASE" if item["settlement_direction"] == "RELEASE_TO_COUNTERPARTY" else "ADJUDICATED_REFUND"
+            else:
+                effective_status = item.get("pre_challenge_status", "") or "FULFILLED"
+        return json.dumps({"intent_id": intent_id, "mandate_id": item["mandate_id"], "status": "CHALLENGE_BLOCKED" if blocked else effective_status, "direction": "" if blocked else item["settlement_direction"], "oldest_open_challenge": oldest, "ready_at": item["settlement_ready_at"], "challenge_deadline": item["challenge_deadline"], "recipient": item["recipient"], "principal": item["principal"], "amount": item["amount"], "intent_fingerprint": item["intent_fingerprint"]}, sort_keys=True, separators=(",", ":"))
 
     @gl.public.view
     def get_authorization_for_vault(self, intent_id: str) -> str:

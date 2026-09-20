@@ -10,3 +10,10 @@ Delegation has seven subset/protection booleans. Fulfillment has nine deliverabl
 
 The contract catches consensus/semantic exceptions and records retry states where possible. A retry state is not a semantic rejection, and `SUBMITTED`, `EVIDENCE_READY`, and `AUTHORIZATION_PENDING` are never presented as consensus-cleared. Challenge adjudication consumes only the target challenge's independent snapshot. A challenge result cannot bulk-resolve other open challenges; deterministic indexing and oldest-first priority remain in force.
 
+Consensus is never inferred from submission or evidence presence. `SUBMITTED`,
+`EVIDENCE_READY`, `AUTHORIZATION_PENDING`, `QUALIFYING`, and retry states are
+not cleared states. Only the accepted structured result followed by its
+deterministic state transition can produce `AUTHORIZED`, `REJECTED`,
+`FULFILLED`, `NOT_FULFILLED`, or `RESOLVED`. Every challenge review has its own
+leader/validator input and result; malformed output or disagreement changes
+only that challenge to a retry state.

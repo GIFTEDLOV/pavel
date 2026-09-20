@@ -1,5 +1,6 @@
 import json
 import hashlib
+import sys
 
 
 # genlayer-test v0.29.2 leaves the Direct Mode stdin handle open until VM
@@ -17,6 +18,25 @@ try:
             pass
 
     _direct_loader._inject_message_to_fd0 = _windows_safe_inject_message
+except ImportError:
+    pass
+
+# genlayer-test v0.29.2 refreshes sender/origin on vm.warp() but leaves the
+# cached message datetime unchanged for same-process calls. PAVEL's contracts
+# intentionally use gl.message_raw["datetime"], so keep the Direct Mode
+# cheatcode faithful to the documented dynamic warp behavior.
+try:
+    from gltest.direct.vm import VMContext as _VMContext
+
+    _original_warp = _VMContext.warp
+
+    def _pavel_warp(vm, timestamp):
+        _original_warp(vm, timestamp)
+        gl_module = sys.modules.get("genlayer.gl")
+        if gl_module is not None and getattr(gl_module, "message_raw", None) is not None:
+            gl_module.message_raw["datetime"] = timestamp
+
+    _VMContext.warp = _pavel_warp
 except ImportError:
     pass
 

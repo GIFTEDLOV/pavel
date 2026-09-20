@@ -25,3 +25,14 @@ The following are machine-testable targets implemented or exercised in Phase 1:
 21. Repeated notices are append-only and processed oldest qualifying unresolved first.
 22. Recovery changes availability, never identity.
 
+23. `SUBMITTED` and infrastructure-failed challenges do not block settlement.
+24. Only deterministically admissible, authenticated, non-expired
+    `QUALIFYING` challenges consume qualifying capacity.
+25. One unresolved submitted or qualifying challenge per challenger per Intent
+    prevents a single address from cheaply filling the intake queue.
+26. Stored challenge records, evidence sets, and review membership are bounded;
+    valid records are append-only and cannot be deleted by the owner.
+27. A stale challenge cannot delay settlement forever: deadline plus the fixed
+    3600-second grace window ends retry intake and permits deterministic expiry.
+28. A transport recovery changes availability only; it cannot change source
+    authority, identity fingerprint, evidence set membership, or snapshot ID.

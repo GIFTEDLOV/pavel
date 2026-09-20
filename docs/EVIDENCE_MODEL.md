@@ -16,3 +16,12 @@ Counterparty identity is registered before Intent creation and binds a protocol 
 
 Evidence pages, invoices, descriptions, commercial terms, and challenge text are untrusted data. Prompts delimit them and explicitly rank the sealed Mandate and protocol schema above embedded instructions.
 
+Recovery is a transport operation, not an identity operation. The committed
+identity fingerprint includes the evidence ID, kind, Mandate ID, Intent ID,
+challenge ID where applicable, expected authority, committed SHA-256,
+committed byte length, policy fingerprint, and sequence. It intentionally does
+not include the recovery transport URL. The recovery URL is consumed once;
+the exact bytes, length, authority, and binding fields must still match. A
+second candidate transport, a recovery after snapshot freeze, mutable-source
+replacement, or a mirror with different bytes is rejected. An original source
+can later recover without changing the original URL or snapshot identity.

@@ -94,12 +94,10 @@ def test_evidence_recovery_rejects_committed_length_mismatch_even_when_hash_matc
     mandate_id = configure_and_seal_core(core, direct_vm, direct_owner, direct_alice)
     intent_id = create_submitted_intent(core, direct_vm, direct_owner, direct_alice, mandate_id)
     body = "Provider: Atlas GPU\nAmount: 3 GEN"
-    evidence_id = add_evidence(core, direct_vm, direct_alice, intent_id, body=body)
+    direct_vm.sender = direct_alice
+    evidence_id = core.define_evidence(intent_id, "QUOTE", "https://evidence.example/quote", "evidence.example", _body_hash(body), len(body.encode("utf-8")) + 1, "mirror.example", 0)
     direct_vm.mock_web(r"evidence\.example/quote", {"status": 503, "body": "temporary"})
     core.stage_evidence(intent_id)
-    definition = json.loads(core.get_evidence(intent_id, 0))
-    definition["committed_byte_length"] = str(len(body.encode("utf-8")) + 1)
-    core.evidence_defs[evidence_id] = json.dumps(definition, sort_keys=True, separators=(",", ":"))
     direct_vm.sender = direct_alice
     core.configure_evidence_recovery(intent_id, evidence_id, "https://mirror.example/quote-copy")
     direct_vm.mock_web(r"mirror\.example/quote-copy", {"status": 200, "body": body})
@@ -135,11 +133,11 @@ def test_permissionless_challenges_are_indexed_and_independently_block_settlemen
     direct_vm.sender = direct_bob
     third = core.open_dispute(intent_id, "DISPUTE-C independent adverse notice")
     assert [core.get_challenge_id(intent_id, i) for i in range(3)] == [first, second, third]
-    assert json.loads(core.get_intent(intent_id))["status"] == "DISPUTED"
-    blocked = json.loads(core.get_settlement_instruction(intent_id))
-    assert blocked["status"] == "CHALLENGE_BLOCKED"
-    assert blocked["direction"] == ""
-    assert blocked["oldest_open_challenge"] == first
+    assert json.loads(core.get_intent(intent_id))["status"] == "FULFILLED"
+    submitted = json.loads(core.get_settlement_instruction(intent_id))
+    assert submitted["status"] == "FULFILLED"
+    assert submitted["direction"] == "RELEASE_TO_COUNTERPARTY"
+    assert submitted["oldest_open_challenge"] == ""
 
     direct_vm.sender = direct_owner
     with direct_vm.expect_revert("only the challenger may define challenge evidence"):
@@ -152,6 +150,12 @@ def test_permissionless_challenges_are_indexed_and_independently_block_settlemen
         core.define_challenge_evidence(challenge_id, "CHALLENGE", "https://challenge.example/" + suffix, "challenge.example", _body_hash(body), len(body.encode("utf-8")), "", 0)
         direct_vm.mock_web("challenge\\.example/" + suffix, {"status": 200, "body": body})
         core.stage_challenge_evidence(challenge_id)
+        assert json.loads(core.get_dispute(challenge_id))["status"] == "QUALIFYING"
+        if challenge_id == first:
+            blocked = json.loads(core.get_settlement_instruction(intent_id))
+            assert blocked["status"] == "CHALLENGE_BLOCKED"
+            assert blocked["direction"] == ""
+            assert blocked["oldest_open_challenge"] == first
 
     vectors = {
         "DISPUTE-A": "RELEASE_TO_COUNTERPARTY",
@@ -173,9 +177,9 @@ def test_permissionless_challenges_are_indexed_and_independently_block_settlemen
         if challenge_id != third:
             assert remaining["status"] == "CHALLENGE_BLOCKED"
 
-    assert json.loads(core.get_dispute(first))["status"] == "ADJUDICATED_RELEASE"
-    assert json.loads(core.get_dispute(second))["status"] == "ADJUDICATED_REFUND"
-    assert json.loads(core.get_dispute(third))["status"] == "ADJUDICATED_RELEASE"
+    assert json.loads(core.get_dispute(first))["status"] == "RESOLVED"
+    assert json.loads(core.get_dispute(second))["status"] == "RESOLVED"
+    assert json.loads(core.get_dispute(third))["status"] == "RESOLVED"
     final = json.loads(core.get_settlement_instruction(intent_id))
     assert final["status"] == "ADJUDICATED_RELEASE"
     assert final["direction"] == "RELEASE_TO_COUNTERPARTY"
@@ -195,4 +199,4 @@ def test_challenge_deadline_and_append_only_history(direct_vm, direct_deploy, di
     core.intents[intent_id] = json.dumps(item, sort_keys=True, separators=(",", ":"))
     with direct_vm.expect_revert("challenge window has closed"):
         core.open_dispute(intent_id, "DISPUTE-LATE")
-    assert json.loads(core.get_dispute(first))["status"] == "OPEN"
+    assert json.loads(core.get_dispute(first))["status"] == "SUBMITTED"

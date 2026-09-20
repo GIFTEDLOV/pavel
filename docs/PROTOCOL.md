@@ -32,3 +32,15 @@ Any address may open a bounded challenge within the challenge window. The challe
 
 Vault requests a release or refund only after reading Core's deterministic direction and challenge index. It moves reserved value to a pending bucket and emits a finalized external EOA message with a namespaced settlement ID. Pending means the external transfer has been requested; it is not a claim that the recipient has been observed credited.
 
+Challenge intake is deliberately two-phase. `SUBMITTED` is an untrusted notice
+and does not block settlement. Deterministic binding, deadline, uniqueness,
+authority, permitted-kind, replay, and capacity checks plus successful required
+evidence authentication are required before `QUALIFYING`. Infrastructure
+failure enters a bounded retry/grace path; it is neither a rejection nor an
+unbounded settlement veto. The 3600-second grace period ends intake and lets
+any caller mark an unresolved stale challenge `EXPIRED`. There are at most 64
+stored records and 16 simultaneously qualifying records per Intent; a
+challenger may have at most one unresolved submitted or qualifying challenge.
+This leaves a
+documented bondless Sybil limitation, but malformed/unqualified notices cannot
+consume security-critical qualifying capacity.

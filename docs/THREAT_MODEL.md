@@ -12,6 +12,7 @@
 | Evidence substitution/replay | Global IDs, Intent/Mandate binding, committed origin/hash/length, immutable evidence-set identity, and snapshot fingerprints. |
 | Mutable/stale URLs | Later reviews use new sequenced snapshots; original snapshots are immutable. Recovery cannot change committed bytes, length, authority, or evidence ID. |
 | Permissionless challenge suppression | Any address may open a bounded challenge; no owner deletion path exists; unresolved challenge indexes deterministically block settlement. |
+| Permissionless challenge griefing / capacity capture | Submission is non-blocking; only authenticated, authority-bound `QUALIFYING` evidence blocks. Per-Intent records and qualifying entries are bounded, duplicate sets are rejected, and one challenger has one unresolved qualifying slot. A fixed deadline+grace expiry prevents infinite liveness delay. Residual bondless Sybil cost is explicit. |
 | Challenge cross-resolution | Each challenge has independent evidence IDs, snapshot, vector, status, and resolution timestamp. Adjudication mutates only that challenge. |
 | Repeated adverse notices | Challenge history is append-only, capped per Intent, chronologically indexed, and never overwritten by newer notices. |
 | Authority identity mutation | Counterparty protocol identities bind wallet, approved HTTPS authority, and fingerprint before Intent creation. URLs are evidence transports, not identity authority. |
@@ -24,4 +25,3 @@
 | Frontend compromise | Browser is not authoritative; all economic values come from Core/Vault reads. |
 | Wrong network | SDK chain/RPC guard rejects chain 61997, studio-dev, and studio-next. |
 | Settlement uncertainty | Pending external states remain unconfirmed; no blind retry. |
-
