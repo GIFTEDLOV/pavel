@@ -53,5 +53,15 @@
       "coreVaultBoundReadback": true
     }
   },
-  "qualificationConclusion": "PAIR_BOUND_LIFECYCLE_PENDING"
+  "lifecycleTransactions": {
+    "principalRegistration": {
+      "tx": "0x62ecaa10b2f11914ebfb3819334a4edcbe96954010b64a3cabb9cf24b76df7c7",
+      "nonce": 173,
+      "status": "FINALIZED",
+      "execution": "SUCCESS",
+      "principal": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f"
+    },
+    "nextDeployerNonce": 174
+  },
+  "qualificationConclusion": "PRINCIPAL_REGISTERED_AGENT_PENDING"
 }

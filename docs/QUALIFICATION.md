@@ -60,6 +60,15 @@ Before the second binding, Core returned the zero Vault address. The Core-side
 binding then finalized successfully in transaction
 `0xe9f17f1ca529616682ea4f40605182460580a30d553ad6efd3e966663a410cb1`, nonce
 `172`, with five agreeing validators and successful execution. Core history
-recorded `VAULT_BOUND`; the pair is now bidirectionally bound. The active
-account is locked; no credential was requested or inspected. No canonical
-production deployment is authorized by this evidence.
+recorded `VAULT_BOUND`; the pair is now bidirectionally bound.
+
+The first lifecycle write, `register_principal`, finalized successfully at
+nonce `173` in transaction
+`0x62ecaa10b2f11914ebfb3819334a4edcbe96954010b64a3cabb9cf24b76df7c7`.
+The deployed schema exposes no principal getter and this method does not append
+history, so the strongest available proof is the finalized contract-state
+snapshot: it contains the sender-address map entry and the true marker for the
+declared `principals: TreeMap[Address,bool]` field. The active account is
+locked; no credential was requested or inspected. The next write is controlled
+agent registration. No canonical production deployment is authorized by this
+evidence.
