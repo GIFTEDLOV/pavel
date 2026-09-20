@@ -1,0 +1,21 @@
+{
+  "name": "pavel-protocol",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.0.9",
+  "engines": { "node": ">=24.14.0" },
+  "scripts": {
+    "frontend:dev": "pnpm --dir frontend dev",
+    "frontend:build": "pnpm --dir frontend build",
+    "frontend:typecheck": "pnpm --dir frontend typecheck",
+    "frontend:lint": "pnpm --dir frontend lint",
+    "network:guard": "node scripts/network-guard.mjs",
+    "source:hash": "node scripts/contract-source-hash.mjs",
+    "test": ".venv/Scripts/pytest.exe -q",
+    "contracts:compile": "python scripts/compile-contracts.py",
+    "contracts:lint": "powershell -ExecutionPolicy Bypass -File scripts/lint-contracts.ps1"
+  },
+  "devDependencies": {
+    "genlayer": "0.39.2"
+  }
+}

@@ -1,0 +1,3 @@
+import Link from "next/link";
+
+export default function Home() { return <main style={{ padding: "10vw 9vw", maxWidth: 1000 }}><span className="eyebrow">PAVEL / STUDIONET FOUNDATION</span><h1>Authority that can be audited. Value that can be accounted for.</h1><p style={{ fontSize: 20, marginTop: 30 }}>PAVEL is constitutional authorization, custody, fulfillment, and dispute infrastructure for autonomous agents.</p><div className="callout"><strong>Phase 1 · Local foundation</strong><p>Canonical state is read from GenLayer Intelligent Contracts. No server wallet, fabricated chain state, or unverified settlement claim.</p></div><p style={{ marginTop: 34 }}><Link href="/app" className="wallet">Enter control plane →</Link></p></main>; }

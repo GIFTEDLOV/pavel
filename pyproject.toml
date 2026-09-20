@@ -1,0 +1,10 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra"
+markers = [
+  "direct: GenLayer Direct Mode test",
+  "property: invariant/property test",
+  "adversarial: adversarial protocol test",
+  "integration: network integration test (not run by default)",
+]

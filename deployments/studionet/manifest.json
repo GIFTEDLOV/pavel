@@ -1,0 +1,11 @@
+{
+  "network": "studionet",
+  "rpc": "https://studio.genlayer.com/api",
+  "chainId": 61999,
+  "currency": "GEN",
+  "explorer": "https://explorer-studio.genlayer.com",
+  "deployed": false,
+  "coreAddress": null,
+  "vaultAddress": null,
+  "sourceHashes": {}
+}

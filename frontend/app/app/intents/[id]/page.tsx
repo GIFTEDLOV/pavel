@@ -1,0 +1,2 @@
+import { ProtocolShell, EmptyState } from "@/components/protocol-shell";
+export default async function IntentDetailPage({ params }: { params: Promise<{ id: string }> }) { const { id } = await params; return <ProtocolShell><p className="mono">INTENT / {id}</p><EmptyState title="Intent state is not cached" body="PAVEL tracks the same transaction ID and re-reads authoritative Core/Vault state before presenting a completed action." /></ProtocolShell>; }

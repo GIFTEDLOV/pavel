@@ -1,0 +1,34 @@
+# Protocol
+
+## Mandates
+
+A principal creates a DRAFT Mandate, configures bounded fields and sealed HTTPS authority constraints, then seals it. Sealing computes a domain-separated SHA-256 fingerprint over canonical JSON. A sealed Mandate is immutable; revocation changes only current validity and retains the original record and fingerprint.
+
+Child Mandates inherit the principal and require the parent authorized agent. Deterministic bounds enforce narrower numeric caps, budgets, duration, validity, expiry, challenge protection, and source-authority membership. A bounded delegation vector is required for semantic scope inheritance before a child can seal.
+
+## Intents
+
+An authorized agent creates and submits an Intent against a registered counterparty identity. Counterparty identity, recipient, amount, deliverable, terms, expiry, and fingerprint are frozen at submission. `SUBMITTED` and `EVIDENCE_READY` are unassessed states; neither means consensus-cleared. `AUTHORIZATION_PENDING` and `AUTHORIZATION_RETRY_REQUIRED` are also not decisions. Legal Core states include DRAFT, SUBMITTED, evidence retry/recovery/repair states, EVIDENCE_READY, AUTHORIZATION_PENDING, AUTHORIZED, fulfillment states, DISPUTED, adjudicated outcomes, EXPIRED, and REJECTED. Vault-only economic states are not mirrored in Core.
+
+## Evidence
+
+Evidence definitions are append-only and bind kind, original HTTPS URL, authority, committed hash/length when available, sequence, Mandate/Intent identity, and policy fingerprint. Bounded remote capture occurs in a nondeterministic block. Deterministic code validates the bounded result and writes a write-once snapshot with digests, byte lengths, excerpts, original and transport URLs, capture time, ancestry, evidence-set identity, and a domain-separated fingerprint. Recovery changes availability, never identity.
+
+## Authorization
+
+Authorization asks whether the frozen Intent complies with the frozen Mandate. The semantic vector contains only bounded booleans and a bounded explanation. Deterministic code checks caller, expiry, amount, recipient, Mandate status, registered identity, source authority, and evidence readiness. Authorization is separate from payment reservation.
+
+## Reservation
+
+Vault synchronously reads Core authorization and validates every frozen economic value, budget, current epoch, available balance, and replay key. It moves available funds to reserved exactly once.
+
+## Fulfillment and disputes
+
+Core requires a matching Vault reservation before fulfillment review. Fulfillment evidence is appended to a later snapshot. The semantic result is FULFILLED, NOT_FULFILLED, or INDETERMINATE; only the first two produce precommitted release/refund directions.
+
+Any address may open a bounded challenge within the challenge window. The challenger must append properly formed challenge evidence and only its own evidence may be assessed. Challenge IDs are indexed per Intent, histories are append-only, and the oldest unresolved challenge has deterministic processing priority. Each challenge has its own fingerprint, evidence IDs, frozen independent snapshot, semantic result, status, and `resolved_at`. Every qualifying unresolved challenge blocks settlement; one challenge result cannot resolve another, and no owner can suppress a frozen third-party challenge.
+
+## Settlement
+
+Vault requests a release or refund only after reading Core's deterministic direction and challenge index. It moves reserved value to a pending bucket and emits a finalized external EOA message with a namespaced settlement ID. Pending means the external transfer has been requested; it is not a claim that the recipient has been observed credited.
+

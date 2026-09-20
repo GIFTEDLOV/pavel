@@ -1,0 +1,2 @@
+import { ProtocolShell, EmptyState } from "@/components/protocol-shell";
+export default async function MandateDetailPage({ params }: { params: Promise<{ id: string }> }) { const { id } = await params; return <ProtocolShell><p className="mono">MANDATE / {id}</p><EmptyState title="Canonical mandate read required" body="This route never substitutes local fixture data for the sealed Core record." /></ProtocolShell>; }
