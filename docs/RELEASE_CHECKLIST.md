@@ -13,7 +13,7 @@ deployment. A qualification address is never silently promoted to production.
 - [ ] Network guard, manifest validation, source hash gate, and secret scan pass.
 - [x] Qualification-v2 Core and Vault both finalize with successful execution.
 - [x] Exact deployed-source parity is established for both contracts.
-- [ ] One-time binding is verified bidirectionally.
+- [x] One-time binding is verified bidirectionally.
 - [ ] Controlled Mandate, evidence, authorization, reservation, fulfillment, challenge, and settlement lifecycle passes.
 - [ ] External-message observation is reported honestly.
 - [ ] Canonical deployment is separately authorized.

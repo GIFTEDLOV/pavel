@@ -44,7 +44,14 @@
       "vaultCoreAddressReadback": "0xbb5e144f1b93f5e7b1a5b3fe07ccf677b29b16ea",
       "vaultCoreBoundReadback": true
     },
-    "coreSetVault": null
+    "coreSetVault": {
+      "tx": "0xe9f17f1ca529616682ea4f40605182460580a30d553ad6efd3e966663a410cb1",
+      "nonce": 172,
+      "status": "FINALIZED",
+      "execution": "SUCCESS",
+      "coreVaultAddressReadback": "0x14d101a283ce2c51e0a4306178bdb5353cd84922",
+      "coreVaultBoundReadback": true
+    }
   },
-  "qualificationConclusion": "VAULT_BOUND_CORE_UNBOUND"
+  "qualificationConclusion": "PAIR_BOUND_LIFECYCLE_PENDING"
 }

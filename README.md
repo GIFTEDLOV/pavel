@@ -46,9 +46,8 @@ node scripts/network-guard.mjs
 GenVM-dependent tests are run serially. A network qualification is separate
 from local verification and uses a new versioned artifact directory.
 
-The qualification-v2 Core and corrected Vault have both finalized successfully
-and are source verified. The Vault-side binding has also finalized; the Core
-side remains unbound pending one owner-authorized write. The economic lifecycle
+The qualification-v2 Core and corrected Vault have both finalized successfully,
+are source verified, and are bidirectionally bound. The economic lifecycle
 requires the next secure signing checkpoint.
 Qualification-v1 remains historical failure evidence and is never a runtime
 default. No server wallet, database authority, GitHub remote, or public

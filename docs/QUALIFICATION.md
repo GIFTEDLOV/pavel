@@ -56,7 +56,10 @@ The Vault-side binding then finalized successfully in transaction
 `0x4cff26c3356d2481a5ab731a995ed7ebe78ded2ec3314883c9c9345b00578be7`, nonce
 `171`, with `MAJORITY_AGREE` and successful execution. The Vault readback
 returned the corrected Core, and history item zero recorded `CORE_BOUND`.
-Before the second binding, Core still returned the zero Vault address. The
-remaining protected operation is `Core.set_vault_address(vault)`. The active
+Before the second binding, Core returned the zero Vault address. The Core-side
+binding then finalized successfully in transaction
+`0xe9f17f1ca529616682ea4f40605182460580a30d553ad6efd3e966663a410cb1`, nonce
+`172`, with five agreeing validators and successful execution. Core history
+recorded `VAULT_BOUND`; the pair is now bidirectionally bound. The active
 account is locked; no credential was requested or inspected. No canonical
 production deployment is authorized by this evidence.

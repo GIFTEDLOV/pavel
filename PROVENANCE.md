@@ -20,9 +20,9 @@ PAVEL is a distinct protocol. No live deployment addresses, transaction hashes, 
 - qualification-v2 corrected Core: `0xBb5e144F1b93F5E7b1A5B3fE07ccf677B29b16EA`, tx `0x7267525ae6e0e08780850c4a8316c163447ba47dd208aecb73f74bc8cda16840`, finalized and source-verified.
 - qualification-v2 corrected Vault: `0x14d101A283cE2C51E0A4306178BdB5353cD84922`, tx `0xadf4ad220c4e87bdfe76fe76eca9695b8217b80b3c832e836f8602533d94b7cc`, nonce `170`, finalized with successful execution and source-verified.
 - qualification-v2 Vault binding: tx `0x4cff26c3356d2481a5ab731a995ed7ebe78ded2ec3314883c9c9345b00578be7`, nonce `171`, finalized with successful execution; Vault history records `CORE_BOUND`.
+- qualification-v2 Core binding: tx `0xe9f17f1ca529616682ea4f40605182460580a30d553ad6efd3e966663a410cb1`, nonce `172`, finalized with successful execution; Core history records `VAULT_BOUND`.
 
 The v1 failure is preserved in `artifacts/studionet/qualification-v1/` and is
 not sanitized. The v2 artifacts are separate and currently record a finalized
-Core, a finalized Vault, and a finalized Vault-side binding; the Core-side
-binding and lifecycle writes await secure manual signing. The canonical
-deployment manifest remains undeployed.
+Core, a finalized Vault, and bidirectional binding; lifecycle writes await
+secure manual signing. The canonical deployment manifest remains undeployed.
