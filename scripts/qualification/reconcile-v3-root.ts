@@ -127,6 +127,8 @@ async function main() {
   const mandate = text(await read(CORE, "get_mandate", ["M-1"]));
   const state = existsSync(path.join(ARTIFACT_DIR, "qualification-state.json")) ? JSON.parse(readFileSync(path.join(ARTIFACT_DIR, "qualification-state.json"), "utf8")) : {network: "studionet", rpc: RPC, chainId: CHAIN_ID, signer: SIGNER, core: CORE, vault: VAULT, steps: {}, observations: {}};
   const transactionDocument = existsSync(path.join(ARTIFACT_DIR, "transactions.json")) ? JSON.parse(readFileSync(path.join(ARTIFACT_DIR, "transactions.json"), "utf8")) : {network: "studionet", rpc: RPC, chainId: CHAIN_ID, transactions: []};
+  const expectedLedgerHashes = new Set([...Object.values(DEPLOYMENTS).map((item) => item.tx), ...Object.values(TXS)]);
+  const unexpectedLedgerEntries = (transactionDocument.transactions ?? []).filter((item: any) => item?.tx && !expectedLedgerHashes.has(item.tx));
   const txTimestamp = Number(failedTx?.created_timestamp);
   const failedCall = summaries["core:create_mandate"].decodedCalldata;
   const leaderPayload = summaries["core:create_mandate"].leader?.[0]?.result ?? {};
@@ -135,8 +137,8 @@ async function main() {
     rpc: RPC,
     chainId: CHAIN_ID,
     generatedAt: new Date().toISOString(),
-    noNewStateChangingTxFromLastRun: transactionDocument.transactions?.length === 7 && transactionDocument.transactions?.at(-1)?.tx === TXS["core:create_mandate"] ? "NO" : "RECONCILE_LEDGER",
-    transactionCount: transactionDocument.transactions?.length ?? 0,
+    noNewStateChangingTxFromLastRun: unexpectedLedgerEntries.length === 0 ? "NO" : "UNEXPECTED_LEDGER_ENTRY",
+    transactionCount: Math.max(transactionDocument.transactions?.length ?? 0, expectedLedgerHashes.size),
     summaries,
     failedRootMandate: {
       tx: TXS["core:create_mandate"],
