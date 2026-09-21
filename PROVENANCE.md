@@ -27,7 +27,8 @@ PAVEL is a distinct protocol. No live deployment addresses, transaction hashes, 
 The v1 failure is preserved in `artifacts/studionet/qualification-v1/` and is
 not sanitized. The v2 artifacts are separate and currently record a finalized
 Core, a finalized Vault, bidirectional binding, principal registration, and
-agent registration; remaining lifecycle writes await secure manual signing.
+agent registration; remaining lifecycle writes await explicit fixed-source
+deployment followed by secure manual signing.
 The canonical deployment manifest remains undeployed.
 
 The qualification-v2 root-Mandate integration failures are both preserved.
@@ -49,8 +50,8 @@ safe replacement is the pinned `genlayer-js` 1.1.8 SDK helper
 encrypted keystore via secure interactive decryption, constructs
 `[CalldataAddress(agent), ""]`, prints and round-trips the typed calldata,
 requires explicit confirmation, submits once, and persists the hash without
-automatic retry. No contract source changed and no third create-Mandate write
-was broadcast during this audit.
+automatic retry. No third create-Mandate write was broadcast during this
+audit.
 
 The subsequent autonomous-runner preparation found that the CLI active profile
 was `agentpact-requester` on `studio-dev`, while the expected qualification
@@ -60,3 +61,13 @@ runner now resolves the expected profile by address, records metadata-only
 preflight evidence, and leaves encrypted-keystore decryption behind one
 explicit confirmation and the secure local password prompt. At this checkpoint
 no new transaction has been submitted.
+
+The subsequent root transaction
+`0x18259af48075b6a1a308b3407dd84fce2d3f871ca16e4930d4c4ef50259df962`
+(nonce `177`) is preserved as finalized consensus `MAJORITY_AGREE` with
+execution error `malformed transaction timezone`. The leader receipt is the
+execution-result source; Core finalized state proves no Mandate mutation
+(`get_mandate_count() == 0`, `M-1 == ""`). Latest and pending signer nonce
+both reconcile to `0xb2`. The local parser compatibility fix is committed,
+but the deployed bytecode remains the old source and therefore qualification-v2
+is historical until an explicitly authorized redeployment and source audit.

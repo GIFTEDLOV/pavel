@@ -46,9 +46,13 @@ node scripts/network-guard.mjs
 GenVM-dependent tests are run serially. A network qualification is separate
 from local verification and uses a new versioned artifact directory.
 
-The qualification-v2 Core and corrected Vault have both finalized successfully,
-are source verified, and are bidirectionally bound. The economic lifecycle
-requires the next secure signing checkpoint.
+The qualification-v2 Core and corrected Vault finalized successfully, are
+source verified at their deployed revision, and are bidirectionally bound.
+The first root-Mandate transaction was finalized with a leader-receipt
+execution error (`malformed transaction timezone`) and no state mutation. A
+local parser compatibility fix and restart-safe reconciliation runner are
+committed; qualification remains historical until the fixed source is
+explicitly deployed and verified.
 Qualification-v1 remains historical failure evidence and is never a runtime
 default. No server wallet, database authority, GitHub remote, or public
 deployment is configured.
@@ -87,8 +91,9 @@ versioned below `artifacts/studionet/` and are not canonical configuration.
 The first Vault deployment exposed a live constructor boundary defect:
 `Address(Address(...))`. It is preserved as qualification-v1 provenance. The
 corrected qualification-v2 Core and Vault are finalized and byte-for-byte
-source verified. Binding, funding, and lifecycle qualification still require
-the operator's secure manual signing step.
+source verified at their deployed revision. Funding and lifecycle qualification
+require explicit fixed-source deployment and the operator's secure manual
+signing step.
 
 Read [`docs/QUALIFICATION.md`](docs/QUALIFICATION.md),
 [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md), and

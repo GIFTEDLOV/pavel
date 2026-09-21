@@ -14,8 +14,8 @@ const CHAIN_ID = 61999;
 const CORE = "0xBb5e144F1b93F5E7b1A5B3fE07ccf677B29b16EA";
 const VAULT = "0x14d101A283cE2C51E0A4306178BdB5353cD84922";
 const EXPECTED_SIGNER = "0xcb5a845638cbc1f95d7f8343278685682c3ba13f";
-const CORE_SHA = "d3ad610319a175041b5d993826a1845e04a3feb4e59082be819859967b858259";
-const VAULT_SHA = "29fd8a384813617b7d37226438b5bb31429ad6e12e81a3ada210429cebf7a794";
+const DEPLOYED_CORE_SHA = "d3ad610319a175041b5d993826a1845e04a3feb4e59082be819859967b858259";
+const DEPLOYED_VAULT_SHA = "29fd8a384813617b7d37226438b5bb31429ad6e12e81a3ada210429cebf7a794";
 const ARTIFACT_DIR = path.join(ROOT, "artifacts", "studionet", "qualification-v2");
 const FIXTURE_PATH = path.join(ARTIFACT_DIR, "qualification-fixture.json");
 const POLL_MS = 5000;
@@ -151,6 +151,18 @@ function assertMandateReadback(mandate: Record<string, any>, fixture: Fixture, e
   if (expectedStatus === "SEALED" && asText(mandate.definition_hash) === "") throw new Error("M-1 sealed policy fingerprint is missing");
 }
 
+async function assertRootMandateState(client: any) {
+  const count = asText(await read(client, CORE, "get_mandate_count"));
+  const mandate = asRecord(await read(client, CORE, "get_mandate", ["M-1"]));
+  const historyLength = asText(await read(client, CORE, "get_history_length"));
+  if (count !== "1") throw new Error(`expected finalized root state transition is absent: mandate count=${count}`);
+  if (Object.keys(mandate).length === 0) throw new Error("expected finalized root state transition is absent: M-1 is missing");
+  if (asText(mandate.principal).toLowerCase() !== EXPECTED_SIGNER || asText(mandate.authorized_agent).toLowerCase() !== EXPECTED_SIGNER || asText(mandate.parent_mandate_id) !== "") {
+    throw new Error("expected finalized root state transition is incorrect: M-1 identity readback mismatch");
+  }
+  return {mandateCount: count, mandateId: "M-1", mandate, historyLength};
+}
+
 function appendTransaction(entry: Record<string, any>) {
   const transactionPath = path.join(ARTIFACT_DIR, "transactions.json");
   let document: any = {network: "studionet", rpc: RPC, chainId: CHAIN_ID, transactions: []};
@@ -166,7 +178,82 @@ async function sleep(ms: number) {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function reconcile(client: any, tx: string, account: any): Promise<any> {
+const CONSENSUS_RESULT_NAMES: Record<string, string> = {
+  "0": "IDLE",
+  "1": "AGREE",
+  "2": "DISAGREE",
+  "3": "TIMEOUT",
+  "4": "DETERMINISTIC_VIOLATION",
+  "5": "NO_MAJORITY",
+  "6": "MAJORITY_AGREE",
+  "7": "MAJORITY_DISAGREE",
+};
+
+function normalizedResultName(value: any): string {
+  if (typeof value === "number" || typeof value === "bigint") return CONSENSUS_RESULT_NAMES[String(value)] ?? String(value);
+  if (typeof value === "string" && /^\d+$/.test(value)) return CONSENSUS_RESULT_NAMES[value] ?? value;
+  return String(value ?? "UNKNOWN").toUpperCase();
+}
+
+function executionValue(value: any): "SUCCESS" | "ERROR" | "UNKNOWN" {
+  if (value === 1 || value === "1") return "SUCCESS";
+  if (value === 2 || value === "2") return "ERROR";
+  const normalized = String(value ?? "").toUpperCase();
+  if (["SUCCESS", "FINISHED_WITH_RETURN", "RETURN", "COMMITTED", "OK"].includes(normalized)) return "SUCCESS";
+  if (["ERROR", "FINISHED_WITH_ERROR", "ROLLBACK", "FAILED", "FAILURE"].includes(normalized)) return "ERROR";
+  return "UNKNOWN";
+}
+
+export function inspectTransactionResults(receipt: any) {
+  const consensusStatus = String(receipt?.statusName ?? receipt?.status ?? "UNKNOWN").toUpperCase();
+  const consensusRaw = receipt?.result_name ?? receipt?.resultName ?? receipt?.result;
+  const consensusResult = normalizedResultName(consensusRaw);
+
+  const directExecutionFields: Array<[string, any]> = [
+    ["txExecutionResultName", receipt?.txExecutionResultName],
+    ["tx_execution_result_name", receipt?.tx_execution_result_name],
+    ["txExecutionResult", receipt?.txExecutionResult],
+    ["tx_execution_result", receipt?.tx_execution_result],
+    ["executionResult", receipt?.executionResult],
+    ["execution_result", receipt?.execution_result],
+  ];
+  for (const [source, value] of directExecutionFields) {
+    if (value !== undefined && value !== null) {
+      const result = executionValue(value);
+      if (result !== "UNKNOWN") return {consensusStatus, consensusResult, executionResult: result, executionResultSource: source};
+    }
+  }
+
+  const leaderReceipts = Array.isArray(receipt?.consensus_data?.leader_receipt)
+    ? receipt.consensus_data.leader_receipt
+    : (Array.isArray(receipt?.leader_receipt) ? receipt.leader_receipt : []);
+  for (const leaderReceipt of leaderReceipts) {
+    const status = leaderReceipt?.result?.status ?? leaderReceipt?.status;
+    const result = executionValue(status);
+    if (result !== "UNKNOWN") return {consensusStatus, consensusResult, executionResult: result, executionResultSource: "leader_receipt.result.status"};
+  }
+
+  const validators = Array.isArray(receipt?.consensus_data?.validators) ? receipt.consensus_data.validators : [];
+  const validatorResults = validators.map((validator: any) => executionValue(validator?.execution_result)).filter((value: string) => value !== "UNKNOWN");
+  if (validatorResults.length > 0 && validatorResults.every((value: string) => value === "ERROR")) {
+    return {consensusStatus, consensusResult, executionResult: "ERROR" as const, executionResultSource: "consensus_data.validators.execution_result"};
+  }
+  if (validatorResults.length > 0 && validatorResults.every((value: string) => value === "SUCCESS")) {
+    return {consensusStatus, consensusResult, executionResult: "SUCCESS" as const, executionResultSource: "consensus_data.validators.execution_result"};
+  }
+  return {consensusStatus, consensusResult, executionResult: "UNKNOWN" as const, executionResultSource: "unavailable"};
+}
+
+export type FinalizedOutcome = "SUCCESS" | "SUCCESS_PROVEN_BY_STATE" | "ERROR" | "UNKNOWN_OR_FAILED";
+
+export function resolveFinalizedOutcome(receipt: any, expectedStateMatched: boolean): FinalizedOutcome {
+  const observation = inspectTransactionResults(receipt);
+  if (observation.executionResult === "SUCCESS") return "SUCCESS";
+  if (observation.executionResult === "ERROR") return "ERROR";
+  return expectedStateMatched ? "SUCCESS_PROVEN_BY_STATE" : "UNKNOWN_OR_FAILED";
+}
+
+async function reconcile(client: any, tx: string, account: any, expectedStateReadback?: () => Promise<any>): Promise<any> {
   let finalizationTx: string | undefined;
   for (let attempt = 1; attempt <= MAX_POLLS; attempt += 1) {
     let receipt: any;
@@ -184,14 +271,25 @@ async function reconcile(client: any, tx: string, account: any): Promise<any> {
     }
     const status = receipt.statusName ?? String(receipt.status ?? "");
     if (status === "FINALIZED") {
-      const result = receipt.resultName ?? receipt.result ?? "UNKNOWN";
-      const execution = receipt.txExecutionResultName ?? receipt.txExecutionResult ?? "UNKNOWN";
-      const resultSuccess = result === "SUCCESS" || result === "AGREE" || result === "MAJORITY_AGREE" || result === 1 || result === "1";
-      const executionSuccess = execution === "FINISHED_WITH_RETURN" || execution === "SUCCESS" || execution === 1 || execution === "1";
-      if (!resultSuccess || !executionSuccess) {
-        throw new Error(`Transaction ${tx} finalized without successful execution (result=${String(result)}, execution=${String(execution)})`);
+      const observation = inspectTransactionResults(receipt);
+      writeArtifact(`tx-${tx.slice(2, 14)}.json`, {tx, attempt, receipt, reconciliation: observation});
+      if (observation.executionResult === "ERROR") {
+        throw new Error(`Transaction ${tx} finalized with execution error (consensus_status=${observation.consensusStatus}, consensus_result=${observation.consensusResult}, execution_result=${observation.executionResult}, execution_result_source=${observation.executionResultSource})`);
       }
-      return {receipt, finalizationTx};
+      if (observation.executionResult === "SUCCESS") {
+        const stateReadback = expectedStateReadback ? await expectedStateReadback() : undefined;
+        return {receipt, finalizationTx, ...observation, outcome: "SUCCESS" as const, stateReadback};
+      }
+      if (!expectedStateReadback) {
+        throw new Error(`Transaction ${tx} finalized with unknown execution (consensus_status=${observation.consensusStatus}, consensus_result=${observation.consensusResult}, execution_result=${observation.executionResult}, execution_result_source=${observation.executionResultSource}); no expected state transition was supplied`);
+      }
+      let stateReadback: any;
+      try {
+        stateReadback = await expectedStateReadback();
+      } catch (error: any) {
+        throw new Error(`Transaction ${tx} finalized with unknown execution and expected state transition was not proven (consensus_status=${observation.consensusStatus}, consensus_result=${observation.consensusResult}, execution_result=${observation.executionResult}, execution_result_source=${observation.executionResultSource}): ${String(error?.message ?? error)}`);
+      }
+      return {receipt, finalizationTx, ...observation, outcome: "SUCCESS_PROVEN_BY_STATE" as const, stateReadback};
     }
     if (status === "CANCELED" || status === "UNDETERMINED" || status === "VALIDATORS_TIMEOUT" || status === "LEADER_TIMEOUT") {
       throw new Error(`Transaction ${tx} reached terminal non-success status ${status}`);
@@ -263,6 +361,7 @@ async function writeStep(
   precondition: () => Promise<void>,
   readback: () => Promise<any>,
   value = 0n,
+  expectedStateReadback?: () => Promise<any>,
 ) {
   if (!Array.isArray(args)) throw new Error(`${label} calldata args must be an array`);
   const calldataProof = decodedArguments(abi, functionName, args);
@@ -273,7 +372,7 @@ async function writeStep(
   console.log(`TX_SUBMITTED=${label} ${tx}`);
   let result: any;
   try {
-    result = await reconcile(client, tx, account);
+    result = await reconcile(client, tx, account, expectedStateReadback);
   } catch (error: any) {
     entry.status = "RECONCILIATION_FAILED";
     entry.error = String(error?.message ?? error);
@@ -282,8 +381,13 @@ async function writeStep(
     throw error;
   }
   entry.status = result.receipt.statusName;
-  entry.execution = result.receipt.txExecutionResultName;
-  entry.resultName = result.receipt.resultName;
+  entry.consensusStatus = result.consensusStatus;
+  entry.consensusResult = result.consensusResult;
+  entry.executionResult = result.executionResult;
+  entry.executionResultSource = result.executionResultSource;
+  entry.reconciliationOutcome = result.outcome;
+  entry.execution = result.executionResult;
+  entry.resultName = result.consensusResult;
   entry.receipt = result.receipt;
   if (result.finalizationTx) entry.finalizationTx = result.finalizationTx;
   const state = await readback();
@@ -311,25 +415,31 @@ async function main() {
   const deps = await loadPinnedDependencies();
   const {abi, chains, createAccount, createClient, CalldataAddress, Wallet, prompt} = deps;
   const fixture = ensureFixtureDefaults(readFixture());
-  if (sha256(path.join(ROOT, "contracts", "pavel_core.py")) !== CORE_SHA) throw new Error("Core source hash mismatch");
-  if (sha256(path.join(ROOT, "contracts", "pavel_vault.py")) !== VAULT_SHA) throw new Error("Vault source hash mismatch");
+  if (sha256(path.join(ROOT, "contracts", "pavel_core.py")) !== DEPLOYED_CORE_SHA) throw new Error("Working Core source differs from the deployed qualification bytecode; refusing to sign");
+  if (sha256(path.join(ROOT, "contracts", "pavel_vault.py")) !== DEPLOYED_VAULT_SHA) throw new Error("Working Vault source differs from the deployed qualification bytecode; refusing to sign");
   if (chains.studionet.id !== CHAIN_ID || chains.studionet.rpcUrls.default.http[0] !== RPC) throw new Error("Pinned SDK Studionet configuration mismatch");
   if (nowSeconds() >= Number(fixture.expiresAt)) throw new Error("Qualification fixture has expired");
+  const resumeRequested = process.argv.includes("--resume");
 
   const readClient = createClient({chain: chains.studionet, endpoint: RPC, account: EXPECTED_SIGNER});
   if (await readClient.getChainId() !== CHAIN_ID) throw new Error("RPC is not Studionet 61999");
-  const [owner, vaultAddress, mandateCount, intentCount, c1, globalAccounting] = await Promise.all([
+  const [owner, vaultAddress, mandateCount, rootMandate, intentCount, c1, globalAccounting] = await Promise.all([
     read(readClient, CORE, "get_owner"),
     read(readClient, CORE, "get_vault_address"),
     read(readClient, CORE, "get_mandate_count"),
+    read(readClient, CORE, "get_mandate", ["M-1"]),
     read(readClient, CORE, "get_intent_count"),
     read(readClient, CORE, "get_counterparty", ["C-1"]),
     read(readClient, VAULT, "get_global_accounting"),
   ]);
   if (asText(owner).toLowerCase() !== EXPECTED_SIGNER) throw new Error("Core owner does not match qualification signer");
   if (asText(vaultAddress).toLowerCase() !== VAULT.toLowerCase()) throw new Error("Core/Vault binding readback mismatch");
+  const rootMandateReadback = asRecord(rootMandate);
+  if (resumeRequested && (asText(mandateCount) !== "1" || Object.keys(rootMandateReadback).length === 0)) {
+    throw new Error("--resume requires finalized M-1 state; refusing to rebroadcast create_mandate");
+  }
   const selectedKeystore = findExpectedKeystore();
-  const plan = {network: "studionet", rpc: RPC, chainId: CHAIN_ID, core: CORE, vault: VAULT, signer: EXPECTED_SIGNER, selectedKeystore: {name: selectedKeystore.name, address: selectedKeystore.address}, mandateCount: asText(mandateCount), intentCount: asText(intentCount), counterpartyC1Present: asText(c1) !== "", globalAccounting: asRecord(globalAccounting), sourceHashes: {core: CORE_SHA, vault: VAULT_SHA}};
+  const plan = {network: "studionet", rpc: RPC, chainId: CHAIN_ID, core: CORE, vault: VAULT, signer: EXPECTED_SIGNER, selectedKeystore: {name: selectedKeystore.name, address: selectedKeystore.address}, resumeRequested, resumePoint: Object.keys(rootMandateReadback).length > 0 ? "AFTER_CREATE_MANDATE" : "CREATE_MANDATE", mandateCount: asText(mandateCount), intentCount: asText(intentCount), counterpartyC1Present: asText(c1) !== "", globalAccounting: asRecord(globalAccounting), sourceHashes: {core: DEPLOYED_CORE_SHA, vault: DEPLOYED_VAULT_SHA}};
   writeArtifact("qualification-run-plan.json", plan);
   console.log(JSON.stringify({QUALIFICATION_PLAN: plan}, null, 2));
   if (process.argv.includes("--preflight-only")) {
@@ -359,6 +469,13 @@ async function main() {
     let mandateId = "M-1";
     let mandate = asRecord(await read(client, CORE, "get_mandate", [mandateId]));
     if (Object.keys(mandate).length === 0) {
+      const transactionPath = path.join(ARTIFACT_DIR, "transactions.json");
+      if (existsSync(transactionPath)) {
+        const transactions = JSON.parse(readFileSync(transactionPath, "utf8"));
+        if (transactions.transactions?.some((item: any) => item.kind === "core:create_mandate" || item.tx === "0x18259af48075b6a1a308b3407dd84fce2d3f871ca16e4930d4c4ef50259df962")) {
+          throw new Error("Existing root create_mandate transaction is already recorded but M-1 is absent; refusing to rebroadcast");
+        }
+      }
       const rootArgs = [address(CalldataAddress, EXPECTED_SIGNER), ""];
       const rootProof = validateRootMandateArgs(abi, rootArgs);
       if (rootProof.argumentCount !== 2 || rootProof.arg1Type !== "string" || rootProof.arg1Length !== 0) throw new Error("Root Mandate calldata boundary proof failed");
@@ -372,7 +489,7 @@ async function main() {
       await writeStep(abi, client, account, "core:create_mandate", "create_mandate", rootArgs, [{type: "Address", value: EXPECTED_SIGNER}, {type: "string", value: "", utf8Length: 0}], async () => {
         const count = await read(client, CORE, "get_mandate_count");
         if (BigInt(asText(count)) !== 0n) throw new Error("Root Mandate precondition changed; count is not zero");
-      }, async () => read(client, CORE, "get_mandate", [mandateId]));
+      }, async () => read(client, CORE, "get_mandate", [mandateId]), 0n, async () => assertRootMandateState(client));
       mandate = asRecord(await read(client, CORE, "get_mandate", [mandateId]));
     }
     if (Object.keys(mandate).length === 0) throw new Error("M-1 was not created");

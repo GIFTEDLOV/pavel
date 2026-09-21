@@ -2,6 +2,8 @@
   "qualificationVersion": "qualification-v2",
   "deployed": true,
   "qualificationOnly": true,
+  "qualificationHistorical": true,
+  "historicalReason": "Root Mandate finalized with execution error malformed transaction timezone; fixed local timestamp parser requires explicit redeployment.",
   "network": {
     "alias": "studionet",
     "rpc": "https://studio.genlayer.com/api",
@@ -97,5 +99,5 @@
     "offlineRoundTrip": "PASS",
     "safeHelper": "scripts/qualification/create-root-mandate.ts"
   },
-  "qualificationConclusion": "ROOT_MANDATE_CALL_ENCODING_CLI_ABANDONED_SDK_HELPER_READY_PENDING_MANUAL_SIGNING"
+  "qualificationConclusion": "ROOT_MANDATE_EXECUTION_ERROR_TIMESTAMP_DEFECT_REQUIRES_EXPLICIT_FIXED_SOURCE_DEPLOYMENT"
 }

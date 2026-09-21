@@ -92,6 +92,17 @@ def test_transaction_datetime_uses_message_context_and_rejects_malformed_zone(di
 
 
 @pytest.mark.direct
+@pytest.mark.parametrize("zone", ["+0000", "+00:00:00"])
+def test_transaction_datetime_accepts_backend_iso8601_timezone_variants(direct_vm, direct_deploy, direct_owner, direct_alice, zone):
+    direct_vm.warp(f"2030-01-01T00:00:00{zone}")
+    core = direct_deploy("contracts/pavel_core.py")
+    direct_vm.sender = direct_owner
+    core.register_principal()
+    core.register_agent(address_text(direct_alice), "agent")
+    assert core.create_mandate(address_text(direct_alice), "") == "M-1"
+
+
+@pytest.mark.direct
 def test_unassessed_and_evidence_ready_views_never_look_authorized(direct_vm, direct_deploy, direct_owner, direct_alice):
     direct_vm.warp(BASE_TIME)
     core = direct_deploy("contracts/pavel_core.py")

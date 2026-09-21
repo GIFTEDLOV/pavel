@@ -134,11 +134,28 @@ class PavelVault(gl.Contract):
             offset = 0
         else:
             self._require(zone[0] == "+" or zone[0] == "-", "malformed transaction timezone")
-            self._require(len(zone) == 6 and zone[3] == ":", "malformed transaction timezone")
-            for char in (zone[1], zone[2], zone[4], zone[5]):
+            body = zone[1:]
+            if len(body) == 5 and body[2] == ":":
+                hour_text = body[0:2]
+                minute_text = body[3:5]
+                second_text = "00"
+            elif len(body) == 4:
+                hour_text = body[0:2]
+                minute_text = body[2:4]
+                second_text = "00"
+            elif len(body) == 8 and body[2] == ":" and body[5] == ":":
+                hour_text = body[0:2]
+                minute_text = body[3:5]
+                second_text = body[6:8]
+            else:
+                self._require(False, "malformed transaction timezone")
+            for char in hour_text + minute_text + second_text:
                 self._require(char in "0123456789", "malformed transaction timezone")
-            offset = int(zone[1:3]) * 3600 + int(zone[4:6]) * 60
-            self._require(int(zone[1:3]) < 24 and int(zone[4:6]) < 60, "malformed transaction timezone")
+            hour_offset = int(hour_text)
+            minute_offset = int(minute_text)
+            second_offset = int(second_text)
+            self._require(hour_offset < 24 and minute_offset < 60 and second_offset < 60, "malformed transaction timezone")
+            offset = hour_offset * 3600 + minute_offset * 60 + second_offset
             if zone[0] == "-":
                 offset = -offset
         base = days * u256(86400) + hour * u256(3600) + minute * u256(60) + second

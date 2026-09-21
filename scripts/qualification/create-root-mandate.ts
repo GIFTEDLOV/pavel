@@ -11,8 +11,8 @@ const CORE = "0xBb5e144F1b93F5E7b1A5B3fE07ccf677B29b16EA";
 const VAULT = "0x14d101A283cE2C51E0A4306178BdB5353cD84922";
 export const EXPECTED_SIGNER = "0xCb5a845638Cbc1f95D7f8343278685682c3bA13F";
 const METHOD = "create_mandate";
-const CORE_SHA = "d3ad610319a175041b5d993826a1845e04a3feb4e59082be819859967b858259";
-const VAULT_SHA = "29fd8a384813617b7d37226438b5bb31429ad6e12e81a3ada210429cebf7a794";
+const DEPLOYED_CORE_SHA = "d3ad610319a175041b5d993826a1845e04a3feb4e59082be819859967b858259";
+const DEPLOYED_VAULT_SHA = "29fd8a384813617b7d37226438b5bb31429ad6e12e81a3ada210429cebf7a794";
 
 function stableCliNodeModules() {
   const pnpmRoot = path.join(ROOT, "node_modules", ".pnpm");
@@ -157,8 +157,8 @@ async function main() {
   const {abi, chains, createAccount, createClient, CalldataAddress, Wallet, prompt} = await loadPinnedDependencies();
   const corePath = path.join(ROOT, "contracts", "pavel_core.py");
   const vaultPath = path.join(ROOT, "contracts", "pavel_vault.py");
-  if (sha256(corePath) !== CORE_SHA) throw new Error("Core source hash mismatch; refusing submission");
-  if (sha256(vaultPath) !== VAULT_SHA) throw new Error("Vault source hash mismatch; refusing submission");
+  if (sha256(corePath) !== DEPLOYED_CORE_SHA) throw new Error("Working Core source differs from the deployed qualification bytecode; refusing submission");
+  if (sha256(vaultPath) !== DEPLOYED_VAULT_SHA) throw new Error("Working Vault source differs from the deployed qualification bytecode; refusing submission");
   if (chains.studionet.id !== CHAIN_ID) throw new Error("Pinned SDK Studionet chain id mismatch");
   if (chains.studionet.rpcUrls.default.http[0] !== RPC) throw new Error("Pinned SDK Studionet RPC mismatch");
 

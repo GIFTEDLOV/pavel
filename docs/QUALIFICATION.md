@@ -119,8 +119,33 @@ polling or retrying. Its offline proof uses the SDK's actual
 `abi.calldata.encode/decode` implementation and round-trips an exact empty
 UTF-8 string.
 
-No contract source hash changed. The next write remains pending secure manual
-signing; Codex must not broadcast it from the remediation audit.
+The deployed contract source hash remains unchanged for the historical
+qualification. The local compatibility fix is tracked separately below; the
+next network write is blocked until that fix is explicitly deployed.
+
+## qualification-v2 root transaction reconciliation
+
+The autonomous runner submitted the pinned SDK root call exactly once as
+transaction
+`0x18259af48075b6a1a308b3407dd84fce2d3f871ca16e4930d4c4ef50259df962`.
+Studionet reports `status=FINALIZED` and consensus `MAJORITY_AGREE`; those are
+consensus fields, not execution success. The full leader receipt reports
+`rollback` with `malformed transaction timezone`, and finalized Core readback
+still reports `get_mandate_count() == 0`, `get_mandate("M-1") == ""`, and no
+history entry. The nonce reconciliation is `latest=0xb2`, `pending=0xb2`.
+The transaction is preserved as an execution error and was not rebroadcast.
+
+The deployed Core/Vault timestamp parser accepted `Z` and `+HH:MM` but not the
+backend-supplied ISO-8601 timezone form. The raw timestamp is not exposed in
+the receipt; the rollback payload is the exact observable error. The local fix accepts
+`+HHMM`, `+HH:MM`, and `+HH:MM:SS` with bounded offsets in both contracts, with
+Direct Mode regression coverage. Because the deployed bytecode still has the
+old source hash, the qualification-v2 deployment is historical until the
+fixed source is explicitly deployed and source-verified. No redeployment was
+performed automatically. The local fixed-source hashes are Core
+`eede6b06cc3c52b9aaa02b56acf4f3ca52475b749b9039fde2fadfd069fbaf7f` and
+Vault `02c1bc58273736b463518ac2859edbe9fc5af732efcce8c8d9dad4b9582edc8c`;
+the deployed manifest intentionally retains the old deployed hashes.
 
 The same audit covered optional empty-string inputs on `define_evidence` and
 `define_challenge_evidence`: an empty precommitted hash is valid only with a
@@ -143,9 +168,11 @@ selection.
 after one explicit plan confirmation, loads the selected encrypted keystore in
 memory and executes the remaining qualification lifecycle sequentially. Every
 write uses the pinned `genlayer-js` typed-argument path, persists its hash
-before polling, reconciles the same hash to `FINALIZED`, checks execution
-success independently, and performs an authoritative readback. Its current
-preflight artifact records zero Mandates, zero Intents, zero Counterparty
-`C-1`, and conserved zero Vault accounting. No lifecycle write has been
-submitted by the runner yet; secure password entry remains the only human
-checkpoint.
+before polling, reconciles the same hash to `FINALIZED`, separates consensus
+from execution, falls back to an exact finalized-state transition when
+execution metadata is unavailable, and performs an authoritative readback.
+The `--resume` path refuses to rebroadcast a recorded root transaction and
+starts only after finalized `M-1` state is present. The current preflight
+artifact records zero Mandates, zero Intents, zero Counterparty `C-1`, and
+conserved zero Vault accounting; secure password entry is not requested while
+the deployed source mismatch remains unresolved.
