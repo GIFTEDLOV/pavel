@@ -9,7 +9,7 @@ const RPC = "https://studio.genlayer.com/api";
 const CHAIN_ID = 61999;
 const CORE = "0xBb5e144F1b93F5E7b1A5B3fE07ccf677B29b16EA";
 const VAULT = "0x14d101A283cE2C51E0A4306178BdB5353cD84922";
-const EXPECTED_SIGNER = "0xCb5a845638Cbc1f95D7f8343278685682c3bA13F";
+export const EXPECTED_SIGNER = "0xCb5a845638Cbc1f95D7f8343278685682c3bA13F";
 const METHOD = "create_mandate";
 const CORE_SHA = "d3ad610319a175041b5d993826a1845e04a3feb4e59082be819859967b858259";
 const VAULT_SHA = "29fd8a384813617b7d37226438b5bb31429ad6e12e81a3ada210429cebf7a794";
@@ -95,14 +95,17 @@ function describeCalldata(abi: any, args: readonly unknown[]) {
   };
 }
 
-function normalizeMetadataAddress(value: unknown) {
+export function normalizeMetadataAddress(value: unknown) {
   const text = String(value ?? "").trim().toLowerCase();
   if (!/^(0x)?[0-9a-f]{40}$/.test(text)) return "";
   return text.startsWith("0x") ? text : `0x${text}`;
 }
 
-export function selectExpectedKeystore(entries: Array<{name: string; address: string; path: string}>, expected = EXPECTED_SIGNER) {
+export type KeystoreMetadata = {name: string; address: string; path: string};
+
+export function selectExpectedKeystore(entries: KeystoreMetadata[], expected = EXPECTED_SIGNER) {
   const expectedAddress = normalizeMetadataAddress(expected);
+  if (expectedAddress === "") throw new Error("Qualification signer address is invalid");
   const matches = entries
     .filter((entry) => normalizeMetadataAddress(entry.address) === expectedAddress)
     .sort((left, right) => left.name.localeCompare(right.name));
@@ -110,7 +113,7 @@ export function selectExpectedKeystore(entries: Array<{name: string; address: st
   return matches[0];
 }
 
-function listKeystoreMetadata() {
+export function listKeystoreMetadata() {
   const keystoreDir = path.join(os.homedir(), ".genlayer", "keystores");
   if (!existsSync(keystoreDir)) throw new Error("GenLayer encrypted keystore directory was not found");
   const entries: Array<{name: string; address: string; path: string}> = [];
@@ -131,8 +134,10 @@ export function findExpectedKeystore() {
   return selectExpectedKeystore(listKeystoreMetadata());
 }
 
-export async function loadExistingAccount(Wallet: any, prompt: any) {
-  const selected = findExpectedKeystore();
+export async function loadExistingAccount(Wallet: any, prompt: any, selected = findExpectedKeystore()) {
+  if (normalizeMetadataAddress(selected.address) !== normalizeMetadataAddress(EXPECTED_SIGNER)) {
+    throw new Error("Selected encrypted keystore is not bound to the qualification signer");
+  }
   const name = selected.name;
   const keystorePath = selected.path;
   const keystoreJson = readFileSync(keystorePath, "utf8");
@@ -142,7 +147,7 @@ export async function loadExistingAccount(Wallet: any, prompt: any) {
     const wallet = await Wallet.fromEncryptedJson(keystoreJson, password);
     password = "";
     if (wallet.address.toLowerCase() !== EXPECTED_SIGNER.toLowerCase()) throw new Error("Decrypted signer address does not match the qualification signer");
-    return {wallet, accountName: name};
+    return {wallet, accountName: name, selectedKeystoreAddress: normalizeMetadataAddress(selected.address)};
   } finally {
     password = "";
   }
