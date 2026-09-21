@@ -76,9 +76,26 @@
       "execution": "ERROR",
       "rootCause": "LIVE_INTEGRATION_DEFECT:EMPTY_STRING_ARGUMENT_DROPPED",
       "stateMutation": "NONE",
-      "correctedPath": "--args <agent> --args="
+      "correctedPath": "abandoned-after-pinned-cli-coercion-audit"
     },
-    "nextDeployerNonce": 176
+    "failedCreateMandateEmptyEquals": {
+      "tx": "0x7eb6175aab8a0cfdfc820a7e3a17f4769655e7d170feb3adce1b26b4622dd6f1",
+      "nonce": 176,
+      "status": "FINALIZED",
+      "execution": "ERROR",
+      "consensus": "MAJORITY_AGREE",
+      "actualSecondArgument": 0,
+      "rootCause": "LIVE_INTEGRATION_DEFECT:CLI_EMPTY_STRING_COERCED_TO_NUMERIC_ZERO",
+      "stateMutation": "NONE"
+    },
+    "nextDeployerNonce": 177
   },
-  "qualificationConclusion": "ROOT_MANDATE_CALL_ENCODING_REMEDIATED_PENDING_MANUAL_SIGNING"
+  "callEncodingAudit": {
+    "pinnedCliExactEmptyStringSupported": false,
+    "sdkFallbackRequired": true,
+    "sdkVersion": "1.1.8",
+    "offlineRoundTrip": "PASS",
+    "safeHelper": "scripts/qualification/create-root-mandate.ts"
+  },
+  "qualificationConclusion": "ROOT_MANDATE_CALL_ENCODING_CLI_ABANDONED_SDK_HELPER_READY_PENDING_MANUAL_SIGNING"
 }

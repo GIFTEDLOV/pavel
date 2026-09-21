@@ -98,18 +98,29 @@ live integration defect, not a Core source defect. The finalized contract
 state hash is identical to the preceding agent-registration state, so no
 Mandate was created.
 
-The corrected stable-CLI path is:
+The apparent correction using the explicit `--args=` token was then tested
+live and failed as well. Transaction
+`0x7eb6175aab8a0cfdfc820a7e3a17f4769655e7d170feb3adce1b26b4622dd6f1`
+(nonce `176`) finalized with `ERROR` and rollback payload
+`parent mandate id must be text`. The pinned CLI's actual calldata was
+`[Address(qualification-agent), 0]`: its `parseScalar("")` path applies
+`Number("")`, producing numeric zero. This second failure also mutated no
+state. Both failed transactions remain permanent qualification-v2 evidence.
 
-```powershell
-pnpm exec genlayer write --rpc https://studio.genlayer.com/api 0xBb5e144F1b93F5E7b1A5B3fE07ccf677B29b16EA create_mandate --args 0xCb5a845638Cbc1f95D7f8343278685682c3bA13F --args=
-```
+The pinned CLI 0.39.2 is therefore abandoned for this root-Mandate call; no
+further CLI quoting trial is safe. The supported fallback is the pinned
+`genlayer-js` 1.1.8 SDK call with `args: [CalldataAddress(agent), ""]`.
+The production helper
+`scripts/qualification/create-root-mandate.ts` checks Studionet, source
+hashes, the zero Mandate count, and the signer address, prints the typed
+calldata, asks for explicit confirmation, decrypts the existing encrypted
+keystore only in memory, submits once, and persists the returned hash without
+polling or retrying. Its offline proof uses the SDK's actual
+`abi.calldata.encode/decode` implementation and round-trips an exact empty
+UTF-8 string.
 
-`--args=` is deliberately a non-empty argv token whose parsed value is the
-exact empty string. The local regression `node
-scripts/qualification-call-data.mjs` proves two arguments, an Address first
-argument, and a string-empty second argument. No contract source hash changed.
-The corrected write has not been broadcast by this remediation pass; the
-account remains subject to secure interactive signing.
+No contract source hash changed. The next write remains pending secure manual
+signing; Codex must not broadcast it from the remediation audit.
 
 The same audit covered optional empty-string inputs on `define_evidence` and
 `define_challenge_evidence`: an empty precommitted hash is valid only with a

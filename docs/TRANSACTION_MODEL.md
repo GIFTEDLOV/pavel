@@ -10,10 +10,19 @@ Phase 1 includes the client abstraction and transaction persistence. Development
 
 ## Empty-string argument transport
 
-The qualification-v2 root-Mandate attempt demonstrated that a standalone empty
-PowerShell argument is not a reliable transport for the pinned CLI's variadic
-`--args <args...>` option. The corrected command uses the explicit non-empty
-token `--args=`; Commander passes its value as `""`. The call-data regression
-also covers the documented SDK shape `writeContract({ args: [agent, ""] })`.
-This is an integration-layer safeguard, not a contract sentinel: the root
-Mandate still receives the actual empty parent ID.
+Qualification-v2 demonstrated two independent pinned-CLI hazards. A
+standalone empty PowerShell/native argv token disappeared before invocation in
+nonce-175 transaction
+`0xcc4d6551d0f76df05bc8c0eefdef5e1e2a593433ede6979fd208a4220f5f64b0`.
+The explicit `--args=` token reached Commander but the CLI's `parseScalar("")`
+coerced it to numeric zero in nonce-176 transaction
+`0x7eb6175aab8a0cfdfc820a7e3a17f4769655e7d170feb3adce1b26b4622dd6f1`.
+Both finalized with execution errors and no state mutation. The pinned CLI is
+not an acceptable empty-string transport and must not be trial-and-error
+replayed.
+
+The safe path is the pinned `genlayer-js` 1.1.8 SDK's
+`writeContract({args: [agent, ""]})`, exercised by the one-off helper and its
+actual `abi.calldata.encode/decode` round-trip. The helper prints the exact
+typed calldata before explicit confirmation, persists the returned hash once,
+and never retries. An empty parent ID is a real text value, not a sentinel.

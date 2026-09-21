@@ -30,11 +30,24 @@ Core, a finalized Vault, bidirectional binding, principal registration, and
 agent registration; remaining lifecycle writes await secure manual signing.
 The canonical deployment manifest remains undeployed.
 
-The qualification-v2 root-Mandate integration failure is also preserved:
-transaction `0xcc4d6551d0f76df05bc8c0eefdef5e1e2a593433ede6979fd208a4220f5f64b0`
-(nonce `175`) finalized with `ERROR` execution despite `MAJORITY_AGREE`. A
-standalone empty PowerShell/native argv value was dropped before the pinned CLI
-invoked `create_mandate`. The exact TypeError, calldata, validator agreement,
-and no-state-mutation proof are retained in
-`artifacts/studionet/qualification-v2/`. The corrected root-Mandate write
-awaits secure manual signing; this is not a contract-source defect.
+The qualification-v2 root-Mandate integration failures are both preserved.
+Transaction `0xcc4d6551d0f76df05bc8c0eefdef5e1e2a593433ede6979fd208a4220f5f64b0`
+(nonce `175`) finalized with `ERROR` despite `MAJORITY_AGREE` because the
+standalone empty argument was omitted before invocation. The second transaction
+`0x7eb6175aab8a0cfdfc820a7e3a17f4769655e7d170feb3adce1b26b4622dd6f1`
+(nonce `176`) also finalized with `ERROR`; the pinned CLI encoded its explicit
+`--args=` value as numeric `0`, producing `parent mandate id must be text`.
+Both had no state mutation. The earlier local regression had false confidence
+because it modeled a custom parser instead of executing the installed CLI's
+`parseScalar/parseArg` implementation. The updated regression extracts the
+actual pinned bundle parser and uses the actual pinned SDK codec for the
+positive path.
+
+The pinned CLI exact-empty-string capability is recorded as unavailable. The
+safe replacement is the pinned `genlayer-js` 1.1.8 SDK helper
+`scripts/qualification/create-root-mandate.ts`, which reuses the existing
+encrypted keystore via secure interactive decryption, constructs
+`[CalldataAddress(agent), ""]`, prints and round-trips the typed calldata,
+requires explicit confirmation, submits once, and persists the hash without
+automatic retry. No contract source changed and no third create-Mandate write
+was broadcast during this audit.
