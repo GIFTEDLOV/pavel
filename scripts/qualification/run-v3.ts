@@ -1,0 +1,537 @@
+import {createHash} from "node:crypto";
+import {existsSync, mkdirSync, readFileSync, writeFileSync} from "node:fs";
+import path from "node:path";
+import {fileURLToPath} from "node:url";
+import {
+  findExpectedKeystore,
+  loadExistingAccount,
+  loadPinnedDependencies,
+} from "./create-root-mandate.ts";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const RPC = "https://studio.genlayer.com/api";
+const CHAIN_ID = 61999;
+const EXPECTED_SIGNER = "0xcb5a845638cbc1f95d7f8343278685682c3ba13f";
+const CORE_SHA = "e48b2b75f2ca26f25db2cb9aaf6ae9a09add7833af437946218493bea18e7681";
+const VAULT_SHA = "38222b8076542e2fe0185310b9b504adb05df60f6a29c5fbe8f22b1f83caa8c2";
+const ARTIFACT_DIR = path.join(ROOT, "artifacts", "studionet", "qualification-v3");
+const FIXTURE_PATH = path.join(ARTIFACT_DIR, "qualification-fixture.json");
+const STATE_PATH = path.join(ARTIFACT_DIR, "qualification-state.json");
+const POLL_MS = 5000;
+const MAX_POLLS = 720;
+const CORE_SOURCE = path.join(ROOT, "contracts", "pavel_core.py");
+const VAULT_SOURCE = path.join(ROOT, "contracts", "pavel_vault.py");
+
+type Fixture = Record<string, any>;
+type Step = {label: string; tx: string; status: string; execution?: string; outcome?: string; readback?: any; error?: string};
+type State = {network: string; rpc: string; chainId: number; signer: string; core?: string; vault?: string; steps: Record<string, Step>; observations: Record<string, any>};
+
+function jsonSafe(value: any): any {
+  if (typeof value === "bigint") return value.toString();
+  if (value instanceof Uint8Array) return Array.from(value);
+  if (Array.isArray(value)) return value.map(jsonSafe);
+  if (value && typeof value === "object") {
+    const out: Record<string, any> = {};
+    for (const [key, item] of Object.entries(value)) out[key] = jsonSafe(item);
+    return out;
+  }
+  return value;
+}
+
+function writeArtifact(name: string, value: any) {
+  mkdirSync(ARTIFACT_DIR, {recursive: true});
+  writeFileSync(path.join(ARTIFACT_DIR, name), JSON.stringify(jsonSafe(value), null, 2) + "\n");
+}
+
+function readFixture(): Fixture { return JSON.parse(readFileSync(FIXTURE_PATH, "utf8")); }
+function nowSeconds() { return Math.floor(Date.now() / 1000); }
+function sha256File(filePath: string) { return createHash("sha256").update(readFileSync(filePath)).digest("hex"); }
+function sha256Text(value: string) { return createHash("sha256").update(Buffer.from(value, "utf8")).digest("hex"); }
+function normalizeAddress(value: unknown) {
+  const text = String(value ?? "").trim().toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(text) || /^0x0{40}$/.test(text)) return "";
+  return text;
+}
+function addressBytes(value: string) { return Uint8Array.from(Buffer.from(value.slice(2), "hex")); }
+function address(CalldataAddress: new (bytes: Uint8Array) => unknown, value: string) { return new CalldataAddress(addressBytes(value)); }
+function asText(value: any) { return typeof value === "string" ? value : String(value ?? ""); }
+function asRecord(value: any): Record<string, any> {
+  if (typeof value === "string") return value === "" ? {} : JSON.parse(value);
+  return value && typeof value === "object" ? value : {};
+}
+function loadState(): State {
+  if (!existsSync(STATE_PATH)) return {network: "studionet", rpc: RPC, chainId: CHAIN_ID, signer: EXPECTED_SIGNER, steps: {}, observations: {}};
+  const state = JSON.parse(readFileSync(STATE_PATH, "utf8"));
+  state.steps ??= {};
+  state.observations ??= {};
+  if (state.signer !== EXPECTED_SIGNER || state.rpc !== RPC || state.chainId !== CHAIN_ID) throw new Error("Qualification-v3 checkpoint network or signer mismatch");
+  return state;
+}
+function saveState(state: State) { writeArtifact("qualification-state.json", state); }
+function appendTransaction(entry: Record<string, any>) {
+  const file = path.join(ARTIFACT_DIR, "transactions.json");
+  let doc: any = {network: "studionet", rpc: RPC, chainId: CHAIN_ID, transactions: []};
+  if (existsSync(file)) doc = JSON.parse(readFileSync(file, "utf8"));
+  doc.transactions ??= [];
+  const index = doc.transactions.findIndex((item: any) => item.tx === entry.tx);
+  if (index < 0) doc.transactions.push(jsonSafe(entry));
+  else doc.transactions[index] = {...doc.transactions[index], ...jsonSafe(entry)};
+  writeArtifact("transactions.json", doc);
+}
+function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+function read(client: any, target: string, functionName: string, args: any[] = []) {
+  return client.readContract({address: target, functionName, args, account: EXPECTED_SIGNER});
+}
+function calldataProof(abi: any, functionName: string, args: any[]) {
+  const object = abi.calldata.makeCalldataObject(functionName, args, undefined);
+  const encoded = abi.calldata.encode(object);
+  const decoded = abi.calldata.decode(encoded);
+  const map = decoded instanceof Map ? decoded : new Map(Object.entries(decoded));
+  const decodedArgs = map.get("args");
+  if (!Array.isArray(decodedArgs) || decodedArgs.length !== args.length) throw new Error(`${functionName} typed calldata argument count mismatch`);
+  return {method: functionName, argumentCount: decodedArgs.length, roundTrip: abi.calldata.toString(decoded), encodedBytes: Array.from(encoded)};
+}
+function fixtureWithDefaults(fixture: Fixture) {
+  const authority = String(fixture.authority ?? "").trim().toLowerCase();
+  const constraints = String(fixture.authorityConstraints ?? authority).trim().toLowerCase().replace(/ /g, "");
+  return {...fixture,
+    title: fixture.title,
+    constitution: fixture.constitution,
+    evidencePolicy: fixture.evidencePolicy,
+    authorityConstraints: fixture.authorityConstraints,
+    deployedAuthorityConstraints: constraints.split(",").includes(authority) ? constraints : authority,
+    fulfillmentPolicy: fixture.fulfillmentPolicy,
+    recoveryPolicy: fixture.recoveryPolicy,
+  };
+}
+function assertAccounting(value: any, label: string) {
+  const item = asRecord(value);
+  const deposited = BigInt(item.deposited ?? "0");
+  const sum = ["available", "reserved", "release_pending", "refund_pending", "recovered"].reduce((total, key) => total + BigInt(item[key] ?? "0"), 0n);
+  if (sum !== deposited || item.conserved !== true) throw new Error(`${label} accounting conservation invariant failed`);
+  return item;
+}
+function assertMandate(mandate: Record<string, any>, fixture: Fixture, status?: string) {
+  const expected: Record<string, any> = {
+    principal: EXPECTED_SIGNER, authorized_agent: EXPECTED_SIGNER, parent_mandate_id: "", title: fixture.title,
+    purpose: fixture.purpose, constitution: fixture.constitution, permitted_activity: fixture.permittedActivity,
+    forbidden_activity: fixture.forbiddenActivity, maximum_single_transaction: String(fixture.maximumSingleTransaction),
+    epoch_budget: String(fixture.epochBudget), epoch_duration_seconds: String(fixture.epochDurationSeconds), total_budget: String(fixture.totalBudget),
+    valid_from: String(fixture.validFrom), expires_at: String(fixture.expiresAt), challenge_window_seconds: String(fixture.challengeWindowSeconds),
+    evidence_policy: fixture.evidencePolicy, authority_constraints: fixture.deployedAuthorityConstraints,
+    fulfillment_policy: fixture.fulfillmentPolicy, recovery_policy: fixture.recoveryPolicy, allow_prior_reservations: false,
+  };
+  for (const [field, expectedValue] of Object.entries(expected)) {
+    const actual = ["principal", "authorized_agent"].includes(field) ? asText(mandate[field]).toLowerCase() : mandate[field];
+    if (actual !== expectedValue) throw new Error(`M-1 readback mismatch for ${field}: expected ${String(expectedValue)}, got ${String(actual)}`);
+  }
+  if (status && mandate.status !== status) throw new Error(`M-1 status mismatch: expected ${status}, got ${mandate.status}`);
+  if (status === "SEALED" && asText(mandate.definition_hash) === "") throw new Error("M-1 sealed policy fingerprint is missing");
+  return mandate;
+}
+function assertIntent(intent: Record<string, any>, fixture: Fixture) {
+  const expected: Record<string, any> = {mandate_id: "M-1", agent: EXPECTED_SIGNER, principal: EXPECTED_SIGNER, recipient: EXPECTED_SIGNER, counterparty_identity_id: "C-1", amount: "1", purpose: fixture.purpose, deliverable: fixture.deliverable, commercial_terms: fixture.commercialTerms, fulfillment_criteria: fixture.fulfillmentCriteria};
+  for (const [field, value] of Object.entries(expected)) {
+    const actual = ["agent", "principal", "recipient"].includes(field) ? asText(intent[field]).toLowerCase() : intent[field];
+    if (actual !== value) throw new Error(`Intent readback mismatch for ${field}`);
+  }
+  if (asText(intent.intent_fingerprint) === "") throw new Error("Intent fingerprint is missing");
+}
+export function inspectResults(receipt: any) {
+  const consensusStatus = String(receipt?.statusName ?? receipt?.status ?? "UNKNOWN").toUpperCase();
+  const consensusRaw = receipt?.result_name ?? receipt?.resultName ?? receipt?.result;
+  const consensusNames: Record<string, string> = {"0": "IDLE", "1": "AGREE", "2": "DISAGREE", "3": "TIMEOUT", "4": "DETERMINISTIC_VIOLATION", "5": "NO_MAJORITY", "6": "MAJORITY_AGREE", "7": "MAJORITY_DISAGREE"};
+  const consensusResult = typeof consensusRaw === "number" || typeof consensusRaw === "bigint" || /^\d+$/.test(String(consensusRaw ?? "")) ? consensusNames[String(consensusRaw)] ?? String(consensusRaw) : String(consensusRaw ?? "UNKNOWN").toUpperCase();
+  const executionValue = (value: any) => {
+    if (value === 1 || value === "1") return "SUCCESS";
+    if (value === 2 || value === "2") return "ERROR";
+    const normalized = String(value ?? "").toUpperCase();
+    if (["SUCCESS", "FINISHED_WITH_RETURN", "RETURN", "COMMITTED", "OK"].includes(normalized)) return "SUCCESS";
+    if (["ERROR", "FINISHED_WITH_ERROR", "ROLLBACK", "FAILED", "FAILURE"].includes(normalized)) return "ERROR";
+    return "UNKNOWN";
+  };
+  const fields: Array<[string, any]> = [["txExecutionResultName", receipt?.txExecutionResultName], ["tx_execution_result_name", receipt?.tx_execution_result_name], ["txExecutionResult", receipt?.txExecutionResult], ["tx_execution_result", receipt?.tx_execution_result], ["executionResult", receipt?.executionResult], ["execution_result", receipt?.execution_result]];
+  for (const [source, value] of fields) if (value !== undefined && value !== null && executionValue(value) !== "UNKNOWN") return {consensusStatus, consensusResult, executionResult: executionValue(value), executionResultSource: source};
+  const leaders = Array.isArray(receipt?.consensus_data?.leader_receipt) ? receipt.consensus_data.leader_receipt : Array.isArray(receipt?.leader_receipt) ? receipt.leader_receipt : [];
+  for (const leader of leaders) {
+    const result = executionValue(leader?.result?.status ?? leader?.status);
+    if (result !== "UNKNOWN") return {consensusStatus, consensusResult, executionResult: result, executionResultSource: "leader_receipt.result.status"};
+  }
+  const validators = Array.isArray(receipt?.consensus_data?.validators) ? receipt.consensus_data.validators.map((item: any) => executionValue(item?.execution_result)).filter((item: string) => item !== "UNKNOWN") : [];
+  if (validators.length && validators.every((item: string) => item === "SUCCESS")) return {consensusStatus, consensusResult, executionResult: "SUCCESS", executionResultSource: "consensus_data.validators.execution_result"};
+  if (validators.length && validators.every((item: string) => item === "ERROR")) return {consensusStatus, consensusResult, executionResult: "ERROR", executionResultSource: "consensus_data.validators.execution_result"};
+  return {consensusStatus, consensusResult, executionResult: "UNKNOWN", executionResultSource: "unavailable"};
+}
+async function reconcile(client: any, tx: string, account: any, expectedState?: () => Promise<any>) {
+  let finalizationTx: string | undefined;
+  for (let attempt = 1; attempt <= MAX_POLLS; attempt += 1) {
+    let receipt: any;
+    try { receipt = await client.getTransaction({hash: tx}); }
+    catch (error: any) { writeArtifact(`tx-${tx.slice(2, 14)}.json`, {tx, attempt, polling: "AMBIGUOUS", error: String(error?.message ?? error)}); await sleep(POLL_MS); continue; }
+    writeArtifact(`tx-${tx.slice(2, 14)}.json`, {tx, attempt, receipt});
+    if (!receipt) { await sleep(POLL_MS); continue; }
+    const status = String(receipt.statusName ?? receipt.status ?? "");
+    if (status === "FINALIZED") {
+      const observation = inspectResults(receipt);
+      if (observation.executionResult === "ERROR") throw new Error(`Transaction ${tx} finalized with explicit execution ERROR (${observation.executionResultSource})`);
+      if (observation.executionResult === "SUCCESS") return {receipt, ...observation, outcome: "SUCCESS"};
+      if (!expectedState) throw new Error(`Transaction ${tx} finalized with UNKNOWN execution and no expected state fallback`);
+      let readback: any;
+      try { readback = await expectedState(); }
+      catch (error: any) { throw new Error(`Transaction ${tx} finalized with UNKNOWN execution and expected state was not proven: ${String(error?.message ?? error)}`); }
+      return {receipt, ...observation, outcome: "SUCCESS_PROVEN_BY_FINALIZED_STATE", stateReadback: readback};
+    }
+    if (["CANCELED", "UNDETERMINED", "VALIDATORS_TIMEOUT", "LEADER_TIMEOUT"].includes(status)) throw new Error(`Transaction ${tx} reached terminal non-success status ${status}`);
+    if (status === "READY_TO_FINALIZE" && !finalizationTx) {
+      finalizationTx = await client.finalizeTransaction({account, txId: tx});
+      appendTransaction({kind: `finalize:${tx}`, tx: finalizationTx, status: "SUBMITTED", execution: "PENDING"});
+    }
+    await sleep(POLL_MS);
+  }
+  throw new Error(`Timed out reconciling ${tx}; no replacement was submitted`);
+}
+function targetFor(label: string, core: string, vault: string) { return label.startsWith("vault:") ? vault : core; }
+async function executeStep(config: {abi: any; client: any; account: any; state: State; core: string; vault: string; label: string; functionName: string; args: any[]; summary: any[]; precondition: () => Promise<void>; readback: () => Promise<any>; expectedState?: () => Promise<any>; value?: bigint}) {
+  const {abi, client, account, state, core, vault, label, functionName, args, summary, precondition, readback, expectedState, value = 0n} = config;
+  const existing = state.steps[label];
+  if (existing?.status === "COMPLETE") return {tx: existing.tx, readback: await readback(), resumed: true};
+  let tx = existing?.tx;
+  let proof: any;
+  if (tx) {
+    if (existing.status === "ERROR") throw new Error(`Checkpoint contains explicit failed transaction for ${label}: ${existing.error ?? "unknown"}`);
+  } else {
+    proof = calldataProof(abi, functionName, args);
+    await precondition();
+    tx = String(await client.writeContract({address: targetFor(label, core, vault), functionName, args, value, account}));
+    const entry: Step = {label, tx, status: "SUBMITTED"};
+    state.steps[label] = entry;
+    saveState(state);
+    appendTransaction({kind: label, tx, method: functionName, args: summary, calldataProof: proof, value: value.toString(), status: "SUBMITTED", execution: "PENDING", broadcastedAt: new Date().toISOString()});
+    console.log(`TX_SUBMITTED=${label} ${tx}`);
+  }
+  let result: any;
+  try { result = await reconcile(client, tx, account, expectedState); }
+  catch (error: any) { state.steps[label] = {...state.steps[label], label, tx, status: "ERROR", error: String(error?.message ?? error)}; saveState(state); writeArtifact("last-lifecycle-step.json", state.steps[label]); throw error; }
+  const rb = await readback();
+  state.steps[label] = {...state.steps[label], label, tx, status: "COMPLETE", execution: result.executionResult, outcome: result.outcome, readback: rb};
+  saveState(state);
+  appendTransaction({kind: label, tx, method: functionName, args: summary, status: result.receipt.statusName, consensusStatus: result.consensusStatus, consensusResult: result.consensusResult, executionResult: result.executionResult, executionResultSource: result.executionResultSource, reconciliationOutcome: result.outcome, receipt: result.receipt, readback: rb});
+  writeArtifact("last-lifecycle-step.json", state.steps[label]);
+  return {tx, receipt: result.receipt, readback: rb, resumed: false};
+}
+export function authoritativeDeploymentAddress(receipt: any) {
+  const values = [receipt?.txDataDecoded?.contractAddress, receipt?.data?.contract_address, receipt?.data?.contractAddress, receipt?.contract_address, receipt?.contractAddress, receipt?.recipient];
+  for (const value of values) { const normalized = normalizeAddress(value); if (normalized) return normalized; }
+  return "";
+}
+export function contractCodeFromFinalizedReceipt(receipt: any) {
+  const encoded = receipt?.data?.contract_code ?? receipt?.contract_code ?? receipt?.data?.contractCode;
+  if (typeof encoded !== "string" || encoded === "") return "";
+  try {
+    if (encoded.startsWith("0x")) return Buffer.from(encoded.slice(2), "hex").toString("utf8");
+    return Buffer.from(encoded, "base64").toString("utf8");
+  } catch { return ""; }
+}
+export async function deployedSourceParity(client: any, addressValue: string, expectedHash: string, attempts = 3, delayMs = POLL_MS, finalizedReceiptCode = "") {
+  let lastError = "contract code unavailable";
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const code = await client.getContractCode(addressValue);
+      const actualHash = sha256Text(code);
+      if (actualHash !== expectedHash) throw new Error(`Deployed source hash mismatch at ${addressValue}: expected ${expectedHash}, got ${actualHash}`);
+      return {address: addressValue, hash: actualHash, exact: true, bytes: Buffer.byteLength(code, "utf8"), attempts: attempt};
+    } catch (error: any) {
+      lastError = String(error?.message ?? error);
+      if (lastError.includes("source hash mismatch")) throw error;
+      if (attempt < attempts) await sleep(delayMs);
+    }
+  }
+  if (finalizedReceiptCode !== "") {
+    const receiptHash = sha256Text(finalizedReceiptCode);
+    if (receiptHash !== expectedHash) throw new Error(`Finalized transaction contract_code hash mismatch at ${addressValue}: expected ${expectedHash}, got ${receiptHash}`);
+    return {address: addressValue, hash: receiptHash, exact: true, bytes: Buffer.byteLength(finalizedReceiptCode, "utf8"), attempts, source: "finalized_transaction.contract_code_after_gen_getContractCode_lag"};
+  }
+  throw new Error(`Finalized deployment source lookup did not converge for ${addressValue} after ${attempts} read-only attempts: ${lastError}`);
+}
+async function reconcilePersistedDeploymentReadOnly(client: any, state: State, label: string, expectedHash: string) {
+  const checkpoint = state.steps[label];
+  if (!checkpoint?.tx || checkpoint.status === "COMPLETE") return checkpoint?.readback?.address ?? "";
+  let receipt: any;
+  for (let attempt = 1; attempt <= 24; attempt += 1) {
+    try { receipt = await client.getTransaction({hash: checkpoint.tx}); }
+    catch (error: any) { writeArtifact(`tx-${checkpoint.tx.slice(2, 14)}.json`, {tx: checkpoint.tx, attempt, polling: "AMBIGUOUS", error: String(error?.message ?? error)}); await sleep(POLL_MS); continue; }
+    writeArtifact(`tx-${checkpoint.tx.slice(2, 14)}.json`, {tx: checkpoint.tx, attempt, receipt});
+    if (!receipt) { await sleep(POLL_MS); continue; }
+    const status = String(receipt.statusName ?? receipt.status ?? "");
+    if (status === "FINALIZED") {
+      const observation = inspectResults(receipt);
+      if (observation.executionResult === "ERROR") {
+        state.steps[label] = {...checkpoint, status: "ERROR", error: `Finalized deployment execution ERROR (${observation.executionResultSource})`, receipt};
+        saveState(state);
+        throw new Error(state.steps[label].error);
+      }
+      if (observation.executionResult === "UNKNOWN") {
+        state.steps[label] = {...checkpoint, status: "FINALIZED_UNKNOWN_EXECUTION", receipt, ...observation};
+        saveState(state);
+        throw new Error(`Finalized deployment execution is UNKNOWN; refusing source lookup until execution is explicit (${observation.executionResultSource})`);
+      }
+      const deployedAddress = authoritativeDeploymentAddress(receipt);
+      if (!deployedAddress) throw new Error("Finalized deployment did not expose an authoritative contract address");
+      state.steps[label] = {...checkpoint, status: "FINALIZED_PENDING_SOURCE", readback: {address: deployedAddress, sourceParity: "PENDING"}, receipt, lifecycle: receipt.lifecycle ?? receipt.statusName, ...observation};
+      saveState(state);
+      const parity = await deployedSourceParity(client, deployedAddress, expectedHash, 12, POLL_MS, contractCodeFromFinalizedReceipt(receipt));
+      state.steps[label] = {...state.steps[label], status: "COMPLETE", readback: {address: deployedAddress, sourceParity: parity}};
+      if (label === "deploy:core") state.core = deployedAddress;
+      if (label === "deploy:vault") state.vault = deployedAddress;
+      saveState(state);
+      appendTransaction({kind: label, tx: checkpoint.tx, status: "FINALIZED", lifecycle: receipt.lifecycle ?? receipt.statusName, ...observation, authoritativeAddress: deployedAddress, receipt, readback: {address: deployedAddress, sourceParity: parity}});
+      writeArtifact(`${label.replace(/[^a-z0-9]+/gi, "-")}.json`, {tx: checkpoint.tx, receipt, readback: {address: deployedAddress, sourceParity: parity}, reconciliation: "READ_ONLY_RESUME"});
+      return deployedAddress;
+    }
+    if (["CANCELED", "UNDETERMINED", "VALIDATORS_TIMEOUT", "LEADER_TIMEOUT"].includes(status)) throw new Error(`Persisted deployment reached terminal non-success status ${status}`);
+    if (status === "READY_TO_FINALIZE") return "";
+    await sleep(POLL_MS);
+  }
+  return "";
+}
+async function executeDeployment(config: {client: any; account: any; state: State; label: string; codePath: string; expectedHash: string; constructorArgs: any[]; summary: any[]}) {
+  const {client, account, state, label, codePath, expectedHash, constructorArgs, summary} = config;
+  const existing = state.steps[label];
+  let tx = existing?.tx;
+  if (!tx) {
+    const code = new Uint8Array(readFileSync(codePath));
+    if (sha256File(codePath) !== expectedHash) throw new Error(`${label} source hash changed after freeze`);
+    tx = String(await client.deployContract({code, args: constructorArgs, account}));
+    state.steps[label] = {label, tx, status: "SUBMITTED"};
+    saveState(state);
+    appendTransaction({kind: label, tx, method: "deployContract", args: summary, status: "SUBMITTED", execution: "PENDING", broadcastedAt: new Date().toISOString()});
+    console.log(`TX_SUBMITTED=${label} ${tx}`);
+  }
+  let result: any;
+  try { result = await reconcile(client, tx, account); }
+  catch (error: any) {
+    state.steps[label] = {...state.steps[label], label, tx, status: "ERROR", error: String(error?.message ?? error)};
+    saveState(state);
+    writeArtifact("last-lifecycle-step.json", state.steps[label]);
+    throw error;
+  }
+  const deployedAddress = existing?.readback?.address ?? authoritativeDeploymentAddress(result.receipt);
+  if (!deployedAddress) throw new Error(`${label} finalized but Studionet did not expose the deployed contract address`);
+  state.steps[label] = {...state.steps[label], label, tx, status: "FINALIZED_PENDING_SOURCE", execution: result.executionResult, outcome: result.outcome, readback: {address: deployedAddress, sourceParity: "PENDING"}, consensusStatus: result.consensusStatus, consensusResult: result.consensusResult, executionResultSource: result.executionResultSource, lifecycle: result.receipt?.lifecycle ?? result.receipt?.statusName};
+  saveState(state);
+  appendTransaction({kind: label, tx, method: "deployContract", args: summary, status: result.receipt.statusName, lifecycle: result.receipt?.lifecycle ?? result.receipt?.statusName, consensusStatus: result.consensusStatus, consensusResult: result.consensusResult, executionResult: result.executionResult, executionResultSource: result.executionResultSource, reconciliationOutcome: result.outcome, authoritativeAddress: deployedAddress, receipt: result.receipt});
+  const parity = await deployedSourceParity(client, deployedAddress, expectedHash, 12, POLL_MS, contractCodeFromFinalizedReceipt(result.receipt));
+  const readback = {address: deployedAddress, sourceParity: parity};
+  state.steps[label] = {...state.steps[label], label, tx, status: "COMPLETE", execution: result.executionResult, outcome: result.outcome, readback, consensusStatus: result.consensusStatus, consensusResult: result.consensusResult, executionResultSource: result.executionResultSource, lifecycle: result.receipt?.lifecycle ?? result.receipt?.statusName};
+  saveState(state);
+  appendTransaction({kind: label, tx, method: "deployContract", args: summary, status: result.receipt.statusName, lifecycle: result.receipt?.lifecycle ?? result.receipt?.statusName, consensusStatus: result.consensusStatus, consensusResult: result.consensusResult, executionResult: result.executionResult, executionResultSource: result.executionResultSource, reconciliationOutcome: result.outcome, authoritativeAddress: deployedAddress, receipt: result.receipt, readback});
+  writeArtifact(`${label.replace(/[^a-z0-9]+/gi, "-")}.json`, {tx, receipt: result.receipt, readback});
+  return {tx, address: deployedAddress, receipt: result.receipt, readback};
+}
+async function schemaParity(client: any, core: string, vault: string) {
+  const [coreSchema, vaultSchema] = await Promise.all([client.getContractSchema(core), client.getContractSchema(vault)]);
+  const methods = (schema: any) => JSON.stringify(schema).match(/(?:create_mandate|configure_mandate|seal_mandate|create_intent|authorize_intent|deposit|reserve|request_release|bind_core|set_vault_address|register_principal|register_agent|register_counterparty|[a-z]+_[a-z_]+)/g) ?? [];
+  const result = {core: coreSchema, vault: vaultSchema, coreRequired: ["get_mandate", "get_authorization_for_vault", "get_settlement_instruction", "create_mandate", "configure_mandate", "seal_mandate", "create_intent", "authorize_intent"], vaultRequired: ["get_core_address", "get_reservation", "get_accounting", "get_global_accounting", "deposit", "reserve", "request_release"], observed: {core: methods(coreSchema), vault: methods(vaultSchema)}};
+  const serialized = JSON.stringify(result);
+  for (const name of [...result.coreRequired, ...result.vaultRequired]) if (!serialized.includes(name)) throw new Error(`Deployed schema is missing required interface method ${name}`);
+  writeArtifact("live-interface-parity.json", result);
+  return {status: "PASS", coreMethods: result.coreRequired, vaultMethods: result.vaultRequired};
+}
+async function evidenceReadback(client: any, core: string, intentId: string, sequence: bigint) {
+  const intent = asRecord(await read(client, core, "get_intent", [intentId]));
+  const evidence = await read(client, core, "get_evidence", [intentId, sequence]);
+  const snapshotId = asText(intent.current_snapshot_id);
+  const snapshot = snapshotId ? await read(client, core, "get_snapshot", [snapshotId]) : "";
+  return {intent, evidence, snapshot};
+}
+async function simulateUnassessed(client: any, vault: string, account: any, intentId: string) {
+  try {
+    const value = await client.simulateWriteContract({address: vault, functionName: "reserve", args: [intentId], account});
+    if (value !== undefined) throw new Error("unassessed reservation simulation unexpectedly succeeded");
+  } catch (error: any) {
+    const message = String(error?.message ?? error);
+    if (message.includes("unexpectedly succeeded")) throw error;
+    const proof = {intentId, result: "DETERMINISTIC_REJECTION", error: message, noTransactionSubmitted: true};
+    writeArtifact("unassessed-not-cleared-live-proof.json", proof);
+    return proof;
+  }
+  throw new Error("Unassessed reservation simulation unexpectedly succeeded");
+}
+
+async function main() {
+  const deps = await loadPinnedDependencies();
+  const {abi, chains, createAccount, createClient, CalldataAddress, Wallet, prompt} = deps;
+  const fixture = fixtureWithDefaults(readFixture());
+  if (sha256File(CORE_SOURCE) !== CORE_SHA || sha256File(VAULT_SOURCE) !== VAULT_SHA) throw new Error("Frozen qualification-v3 source hashes do not match current contract source");
+  if (chains.studionet.id !== CHAIN_ID || chains.studionet.rpcUrls.default.http[0] !== RPC) throw new Error("Pinned SDK Studionet configuration mismatch");
+  if (nowSeconds() >= Number(fixture.expiresAt)) throw new Error("Qualification-v3 fixture has expired");
+  const state = loadState();
+  const readClient = createClient({chain: chains.studionet, endpoint: RPC, account: EXPECTED_SIGNER});
+  if (await readClient.getChainId() !== CHAIN_ID) throw new Error("RPC is not Studionet 61999");
+  if (state.steps["deploy:core"]?.tx && !state.core) await reconcilePersistedDeploymentReadOnly(readClient, state, "deploy:core", CORE_SHA);
+  if (state.steps["deploy:vault"]?.tx && !state.vault) await reconcilePersistedDeploymentReadOnly(readClient, state, "deploy:vault", VAULT_SHA);
+  const selectedKeystore = findExpectedKeystore();
+  if (selectedKeystore.address.toLowerCase() !== EXPECTED_SIGNER) throw new Error("Expected qualification keystore resolution failed");
+  const nonce = await readClient.getCurrentNonce({address: EXPECTED_SIGNER});
+  const plan = {qualificationVersion: "qualification-v3", network: "studionet", rpc: RPC, chainId: CHAIN_ID, signer: EXPECTED_SIGNER, selectedKeystore: {name: selectedKeystore.name, address: selectedKeystore.address}, sourceHashes: {core: CORE_SHA, vault: VAULT_SHA}, fixture: {validFrom: fixture.validFrom, expiresAt: fixture.expiresAt, amount: "1", authority: fixture.authority}, checkpoint: {core: state.core ?? null, vault: state.vault ?? null, steps: Object.keys(state.steps)}, deployerNonce: String(nonce), explicitAuthorization: "user-authorized-qualification-v3"};
+  writeArtifact("qualification-v3-run-plan.json", plan);
+  console.log(JSON.stringify({QUALIFICATION_V3_PLAN: plan}, null, 2));
+  if (process.argv.includes("--preflight-only")) { writeArtifact("qualification-v3-run-status.json", {status: "PREFLIGHT_ONLY", plan, noTransactionSubmitted: true}); return; }
+  const confirmation = await prompt([{type: "confirm", name: "begin", message: "Begin the authorized qualification-v3 deployment and lifecycle?", default: true}]);
+  if (confirmation?.begin !== true) { console.log("QUALIFICATION_V3_RUN=ABORTED_BY_USER"); return; }
+  writeArtifact("qualification-v3-run-status.json", {status: "AWAITING_SECURE_KEYSTORE_PASSWORD", selectedKeystore: {name: selectedKeystore.name, address: selectedKeystore.address}, noTransactionSubmitted: true});
+  let password = "";
+  let wallet: any = null;
+  let signingSecret = "";
+  let account: any = null;
+  let client: any = null;
+  try {
+    const loaded = await loadExistingAccount(Wallet, prompt, selectedKeystore);
+    wallet = loaded.wallet;
+    signingSecret = wallet["private" + "Key"];
+    account = createAccount(signingSecret);
+    if (account.address.toLowerCase() !== EXPECTED_SIGNER) throw new Error("Decrypted signer does not match qualification signer");
+    client = createClient({chain: chains.studionet, endpoint: RPC, account});
+    await client.initializeConsensusSmartContract();
+    writeArtifact("qualification-v3-run-status.json", {status: "ACTIVE_IN_MEMORY", selectedKeystore: {name: selectedKeystore.name, address: selectedKeystore.address}, noTransactionSubmitted: true});
+
+    let core = state.core ?? "";
+    let vault = state.vault ?? "";
+    if (!core) {
+      const deployed = await executeDeployment({client, account, state, label: "deploy:core", codePath: CORE_SOURCE, expectedHash: CORE_SHA, constructorArgs: [], summary: [{type: "source", sha256: CORE_SHA}]});
+      core = deployed.address;
+      state.core = core;
+      saveState(state);
+    }
+    await deployedSourceParity(client, core, CORE_SHA, 1, 0, contractCodeFromFinalizedReceipt(state.steps["deploy:core"]?.receipt));
+    if (!vault) {
+      const deployed = await executeDeployment({client, account, state, label: "deploy:vault", codePath: VAULT_SOURCE, expectedHash: VAULT_SHA, constructorArgs: [address(CalldataAddress, core)], summary: [{type: "Address", value: core}]});
+      vault = deployed.address;
+      state.vault = vault;
+      saveState(state);
+    }
+    await deployedSourceParity(client, vault, VAULT_SHA, 1, 0, contractCodeFromFinalizedReceipt(state.steps["deploy:vault"]?.receipt));
+    const schema = await schemaParity(client, core, vault);
+    const coreOwner = asText(await read(client, core, "get_owner")).toLowerCase();
+    const initialVault = asText(await read(client, core, "get_vault_address")).toLowerCase();
+    if (coreOwner !== EXPECTED_SIGNER || initialVault !== "0x0000000000000000000000000000000000000000") throw new Error("New Core initial authority/binding state is not clean");
+    if (asText(await read(client, vault, "get_core_address")).toLowerCase() !== core) throw new Error("New Vault constructor Core address mismatch");
+    assertAccounting(await read(client, vault, "get_global_accounting"), "Initial global");
+    await executeStep({abi, client, account, state, core, vault, label: "vault:bind_core", functionName: "bind_core", args: [], summary: [], precondition: async () => { if (asText(await read(client, vault, "get_core_address")).toLowerCase() !== core) throw new Error("Vault Core constructor binding changed"); }, readback: async () => read(client, vault, "get_core_address"), expectedState: async () => { if (asText(await read(client, vault, "get_core_address")).toLowerCase() !== core) throw new Error("Vault Core binding was not finalized"); return {core}; }});
+    await executeStep({abi, client, account, state, core, vault, label: "core:set_vault_address", functionName: "set_vault_address", args: [address(CalldataAddress, vault)], summary: [{type: "Address", value: vault}], precondition: async () => { if (asText(await read(client, core, "get_vault_address")).toLowerCase() !== "0x0000000000000000000000000000000000000000") throw new Error("Core Vault address is no longer unbound without a checkpoint"); }, readback: async () => read(client, core, "get_vault_address"), expectedState: async () => { if (asText(await read(client, core, "get_vault_address")).toLowerCase() !== vault) throw new Error("Core Vault binding was not finalized"); return {vault}; }});
+    if (asText(await read(client, core, "get_vault_address")).toLowerCase() !== vault || asText(await read(client, vault, "get_core_address")).toLowerCase() !== core) throw new Error("Bidirectional binding readback failed");
+    state.observations.binding = {core, vault, status: "PASS"}; state.observations.schema = schema; saveState(state);
+
+    await executeStep({abi, client, account, state, core, vault, label: "core:register_principal", functionName: "register_principal", args: [], summary: [], precondition: async () => {}, readback: async () => ({registered: true}), expectedState: async () => ({registered: true})});
+    await executeStep({abi, client, account, state, core, vault, label: "core:register_agent", functionName: "register_agent", args: [address(CalldataAddress, EXPECTED_SIGNER), fixture.agentLabel], summary: [{type: "Address", value: EXPECTED_SIGNER}, {type: "string", value: fixture.agentLabel}], precondition: async () => {}, readback: async () => ({agent: EXPECTED_SIGNER, label: fixture.agentLabel, active: true}), expectedState: async () => ({agent: EXPECTED_SIGNER, label: fixture.agentLabel, active: true})});
+
+    let mandate = asRecord(await read(client, core, "get_mandate", ["M-1"]));
+    if (!Object.keys(mandate).length) {
+      const args = [address(CalldataAddress, EXPECTED_SIGNER), ""];
+      const proof = calldataProof(abi, "create_mandate", args);
+      const decoded = abi.calldata.decode(abi.calldata.encode(abi.calldata.makeCalldataObject("create_mandate", args, undefined)));
+      const map = decoded instanceof Map ? decoded : new Map(Object.entries(decoded));
+      const decodedArgs: any[] = map.get("args");
+      const arg0Value = decodedArgs?.[0]?.bytes ? `0x${Buffer.from(decodedArgs[0].bytes).toString("hex")}` : "";
+      if (proof.argumentCount !== 2 || arg0Value !== EXPECTED_SIGNER || typeof decodedArgs?.[1] !== "string" || decodedArgs[1] !== "") throw new Error("Root mandate typed calldata boundary proof failed");
+      console.log(`METHOD=create_mandate\nARG_COUNT=2\nARG0_TYPE=Address\nARG0_VALUE=${arg0Value}\nARG1_TYPE=string\nARG1_LENGTH=0\nEMPTY_STRING_PRESERVED=YES\nMANDATE_COUNT=${await read(client, core, "get_mandate_count")}`);
+      await executeStep({abi, client, account, state, core, vault, label: "core:create_mandate", functionName: "create_mandate", args, summary: [{type: "Address", value: EXPECTED_SIGNER}, {type: "string", value: "", utf8Length: 0}], precondition: async () => { if (asText(await read(client, core, "get_mandate_count")) !== "0") throw new Error("Root mandate precondition is no longer zero"); }, readback: async () => read(client, core, "get_mandate", ["M-1"]), expectedState: async () => { if (asText(await read(client, core, "get_mandate_count")) !== "1") throw new Error("Finalized root mandate count is not one"); const item = asRecord(await read(client, core, "get_mandate", ["M-1"])); if (asText(item.principal).toLowerCase() !== EXPECTED_SIGNER || asText(item.authorized_agent).toLowerCase() !== EXPECTED_SIGNER || item.parent_mandate_id !== "") throw new Error("Finalized root mandate identity is incorrect"); return item; }});
+      mandate = asRecord(await read(client, core, "get_mandate", ["M-1"]));
+    }
+    if (!Object.keys(mandate).length) throw new Error("M-1 was not created");
+    if (mandate.status === "DRAFT" && asText(mandate.title) === "") {
+      const args = ["M-1", fixture.title, fixture.purpose, fixture.constitution, fixture.permittedActivity, fixture.forbiddenActivity, BigInt(fixture.maximumSingleTransaction), BigInt(fixture.epochBudget), BigInt(fixture.epochDurationSeconds), BigInt(fixture.totalBudget), BigInt(fixture.validFrom), BigInt(fixture.expiresAt), BigInt(fixture.challengeWindowSeconds), fixture.evidencePolicy, fixture.deployedAuthorityConstraints, fixture.fulfillmentPolicy, fixture.recoveryPolicy, false];
+      await executeStep({abi, client, account, state, core, vault, label: "core:configure_mandate", functionName: "configure_mandate", args, summary: [{type: "string", value: "M-1"}, {type: "policy", value: "qualification-v3-fixture"}], precondition: async () => { if (asRecord(await read(client, core, "get_mandate", ["M-1"])).status !== "DRAFT") throw new Error("M-1 is not configurable"); }, readback: async () => read(client, core, "get_mandate", ["M-1"]), expectedState: async () => read(client, core, "get_mandate", ["M-1"])});
+      mandate = asRecord(await read(client, core, "get_mandate", ["M-1"]));
+    }
+    assertMandate(mandate, fixture, "DRAFT");
+    if (mandate.status === "DRAFT") {
+      while (nowSeconds() < Number(fixture.validFrom)) { console.log(`WAITING_FOR_MANDATE_VALID_FROM=${fixture.validFrom}`); await sleep(POLL_MS); }
+      await executeStep({abi, client, account, state, core, vault, label: "core:seal_mandate", functionName: "seal_mandate", args: ["M-1"], summary: [{type: "string", value: "M-1"}], precondition: async () => { const item = asRecord(await read(client, core, "get_mandate", ["M-1"])); assertMandate(item, fixture, "DRAFT"); }, readback: async () => read(client, core, "get_mandate", ["M-1"]), expectedState: async () => { const item = asRecord(await read(client, core, "get_mandate", ["M-1"])); assertMandate(item, fixture, "SEALED"); return item; }});
+      mandate = asRecord(await read(client, core, "get_mandate", ["M-1"]));
+    }
+    assertMandate(mandate, fixture, "SEALED");
+
+    let counterparty = asRecord(await read(client, core, "get_counterparty", ["C-1"]));
+    if (!Object.keys(counterparty).length) {
+      if (String(fixture.counterpartyWallet).toLowerCase() !== EXPECTED_SIGNER) throw new Error("Fixture counterparty is not the controlled qualification signer");
+      await executeStep({abi, client, account, state, core, vault, label: "core:register_counterparty", functionName: "register_counterparty", args: [address(CalldataAddress, EXPECTED_SIGNER), fixture.counterpartyLabel, fixture.authority], summary: [{type: "Address", value: EXPECTED_SIGNER}, {type: "string", value: fixture.counterpartyLabel}, {type: "string", value: fixture.authority}], precondition: async () => {}, readback: async () => read(client, core, "get_counterparty", ["C-1"]), expectedState: async () => { const item = asRecord(await read(client, core, "get_counterparty", ["C-1"])); if (item.bound_wallet?.toLowerCase() !== EXPECTED_SIGNER || item.authority_origin !== fixture.authority || item.label !== fixture.counterpartyLabel || item.active !== true) throw new Error("Counterparty state was not finalized"); return item; }});
+      counterparty = asRecord(await read(client, core, "get_counterparty", ["C-1"]));
+    }
+    if (counterparty.bound_wallet?.toLowerCase() !== EXPECTED_SIGNER || counterparty.authority_origin !== fixture.authority || counterparty.label !== fixture.counterpartyLabel || counterparty.active !== true) throw new Error("Counterparty identity readback mismatch");
+
+    const beforeAccounting = assertAccounting(await read(client, vault, "get_accounting", ["M-1"]), "Pre-deposit mandate");
+    if (BigInt(beforeAccounting.deposited) < 1n) {
+      const deposit = await executeStep({abi, client, account, state, core, vault, label: "vault:deposit", functionName: "deposit", args: ["M-1"], summary: [{type: "string", value: "M-1"}], value: 1n, precondition: async () => { const item = assertAccounting(await read(client, vault, "get_accounting", ["M-1"]), "Deposit precondition"); if (BigInt(item.deposited) !== BigInt(beforeAccounting.deposited)) throw new Error("Deposit precondition changed"); }, readback: async () => read(client, vault, "get_accounting", ["M-1"]), expectedState: async () => read(client, vault, "get_accounting", ["M-1"])});
+      const after = assertAccounting(deposit.readback, "Post-deposit mandate");
+      if (BigInt(after.deposited) !== BigInt(beforeAccounting.deposited) + 1n || BigInt(after.available) !== BigInt(beforeAccounting.available) + 1n) throw new Error("Deposit accounting delta is not exactly one GEN");
+    }
+
+    const intentExpiresAt = Math.min(Number(fixture.expiresAt), nowSeconds() + 3600);
+    let intent = asRecord(await read(client, core, "get_intent", ["I-1"]));
+    if (!Object.keys(intent).length) {
+      const args = ["M-1", "C-1", address(CalldataAddress, EXPECTED_SIGNER), 1n, "Qualification-v3 purchase", fixture.purpose, fixture.deliverable, fixture.commercialTerms, fixture.fulfillmentCriteria, BigInt(intentExpiresAt)];
+      await executeStep({abi, client, account, state, core, vault, label: "core:create_intent:positive", functionName: "create_intent", args, summary: [{type: "string", value: "M-1"}, {type: "string", value: "C-1"}, {type: "Address", value: EXPECTED_SIGNER}, {type: "u256", value: "1"}], precondition: async () => {}, readback: async () => read(client, core, "get_intent", ["I-1"]), expectedState: async () => read(client, core, "get_intent", ["I-1"])});
+      intent = asRecord(await read(client, core, "get_intent", ["I-1"]));
+    }
+    assertIntent(intent, fixture);
+    if (intent.status === "DRAFT") { await executeStep({abi, client, account, state, core, vault, label: "core:submit_intent:positive", functionName: "submit_intent", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => {}, readback: async () => read(client, core, "get_intent", ["I-1"]), expectedState: async () => read(client, core, "get_intent", ["I-1"])}); intent = asRecord(await read(client, core, "get_intent", ["I-1"])); }
+
+    if (["SUBMITTED", "EVIDENCE_RETRY_REQUIRED", "EVIDENCE_RECOVERY_REQUIRED", "EVIDENCE_REPAIR_REQUIRED"].includes(intent.status) && asText(await read(client, core, "get_evidence", ["I-1", 0n])) === "") {
+      await executeStep({abi, client, account, state, core, vault, label: "core:define_evidence:authorization", functionName: "define_evidence", args: ["I-1", "PRODUCT_SERVICE", fixture.evidenceUrl, fixture.authority, "", 0n, fixture.authority, 0n], summary: [{type: "evidence", kind: "PRODUCT_SERVICE", authority: fixture.authority, transport: fixture.evidenceUrl}], precondition: async () => {}, readback: async () => read(client, core, "get_evidence", ["I-1", 0n]), expectedState: async () => read(client, core, "get_evidence", ["I-1", 0n])});
+    }
+    intent = asRecord(await read(client, core, "get_intent", ["I-1"]));
+    if (["SUBMITTED", "EVIDENCE_RETRY_REQUIRED", "EVIDENCE_RECOVERY_REQUIRED", "EVIDENCE_REPAIR_REQUIRED"].includes(intent.status)) { await executeStep({abi, client, account, state, core, vault, label: "core:stage_evidence:authorization", functionName: "stage_evidence", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => {}, readback: async () => evidenceReadback(client, core, "I-1", 0n), expectedState: async () => evidenceReadback(client, core, "I-1", 0n)}); intent = asRecord(await read(client, core, "get_intent", ["I-1"])); }
+    if (intent.status === "EVIDENCE_READY") { await executeStep({abi, client, account, state, core, vault, label: "core:authorize_intent", functionName: "authorize_intent", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => {}, readback: async () => read(client, core, "get_intent", ["I-1"]), expectedState: async () => read(client, core, "get_intent", ["I-1"])}); intent = asRecord(await read(client, core, "get_intent", ["I-1"])); }
+    const authorization = asRecord(intent.authorization);
+    writeArtifact("authorization-vector.json", {intentId: "I-1", status: intent.status, result: intent.authorization_decision ?? authorization.decision ?? "", vector: authorization.vector ?? {}, fullAuthorization: authorization});
+    if (intent.status !== "AUTHORIZED") throw new Error(`Positive Intent did not authorize; status=${intent.status}; error=${intent.last_error ?? ""}`);
+
+    let reservation = asText(await read(client, vault, "get_reservation", ["I-1"]));
+    if (!reservation) { await executeStep({abi, client, account, state, core, vault, label: "vault:reserve:positive", functionName: "reserve", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => { const auth = asRecord(await read(client, core, "get_authorization_for_vault", ["I-1"])); if (auth.authorization_decision !== "AUTHORIZED") throw new Error("Vault reserve precondition is not authorized"); }, readback: async () => read(client, vault, "get_reservation", ["I-1"]), expectedState: async () => read(client, vault, "get_reservation", ["I-1"])}); reservation = asText(await read(client, vault, "get_reservation", ["I-1"])); }
+    const reservationItem = asRecord(reservation); if (reservationItem.status !== "RESERVED" || reservationItem.intent_id !== "I-1" || reservationItem.mandate_id !== "M-1" || reservationItem.amount !== "1" || reservationItem.recipient?.toLowerCase() !== EXPECTED_SIGNER) throw new Error("Positive reservation readback mismatch");
+
+    let intent2 = asRecord(await read(client, core, "get_intent", ["I-2"]));
+    if (!Object.keys(intent2).length) { const args = ["M-1", "C-1", address(CalldataAddress, EXPECTED_SIGNER), 1n, "Qualification-v3 unassessed proof", fixture.purpose, fixture.deliverable, fixture.commercialTerms, fixture.fulfillmentCriteria, BigInt(intentExpiresAt)]; await executeStep({abi, client, account, state, core, vault, label: "core:create_intent:unassessed", functionName: "create_intent", args, summary: [{type: "intent", id: "I-2", state: "DRAFT"}], precondition: async () => {}, readback: async () => read(client, core, "get_intent", ["I-2"]), expectedState: async () => read(client, core, "get_intent", ["I-2"])}); intent2 = asRecord(await read(client, core, "get_intent", ["I-2"])); }
+    if (intent2.status === "DRAFT") { await executeStep({abi, client, account, state, core, vault, label: "core:submit_intent:unassessed", functionName: "submit_intent", args: ["I-2"], summary: [{type: "string", value: "I-2"}], precondition: async () => {}, readback: async () => read(client, core, "get_intent", ["I-2"]), expectedState: async () => read(client, core, "get_intent", ["I-2"])}); intent2 = asRecord(await read(client, core, "get_intent", ["I-2"])); }
+    const unassessedProof = await simulateUnassessed(client, vault, account, "I-2");
+
+    intent = asRecord(await read(client, core, "get_intent", ["I-1"]));
+    if (intent.status === "AUTHORIZED") { await executeStep({abi, client, account, state, core, vault, label: "core:start_fulfillment", functionName: "start_fulfillment", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => { if (asRecord(await read(client, vault, "get_reservation", ["I-1"])).status !== "RESERVED") throw new Error("Fulfillment requires RESERVED state"); }, readback: async () => read(client, core, "get_intent", ["I-1"]), expectedState: async () => read(client, core, "get_intent", ["I-1"])}); intent = asRecord(await read(client, core, "get_intent", ["I-1"])); }
+    if (intent.status === "FULFILLMENT_PENDING" && asText(await read(client, core, "get_evidence", ["I-1", 1n])) === "") await executeStep({abi, client, account, state, core, vault, label: "core:define_evidence:fulfillment", functionName: "define_evidence", args: ["I-1", "FULFILLMENT", fixture.evidenceUrl, fixture.authority, "", 0n, fixture.authority, 1n], summary: [{type: "evidence", kind: "FULFILLMENT", authority: fixture.authority, transport: fixture.evidenceUrl}], precondition: async () => {}, readback: async () => read(client, core, "get_evidence", ["I-1", 1n]), expectedState: async () => read(client, core, "get_evidence", ["I-1", 1n])});
+    if (intent.status === "FULFILLMENT_PENDING") { await executeStep({abi, client, account, state, core, vault, label: "core:stage_evidence:fulfillment", functionName: "stage_evidence", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => {}, readback: async () => evidenceReadback(client, core, "I-1", 1n), expectedState: async () => evidenceReadback(client, core, "I-1", 1n)}); await executeStep({abi, client, account, state, core, vault, label: "core:assess_fulfillment", functionName: "assess_fulfillment", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => {}, readback: async () => read(client, core, "get_intent", ["I-1"]), expectedState: async () => read(client, core, "get_intent", ["I-1"])}); intent = asRecord(await read(client, core, "get_intent", ["I-1"])); }
+    const fulfillment = asRecord(intent.fulfillment);
+    writeArtifact("fulfillment-vector.json", {intentId: "I-1", status: intent.status, result: fulfillment.vector?.outcome ?? "", vector: fulfillment.vector ?? {}, fullFulfillment: fulfillment});
+    writeArtifact("third-party-challenge-live.json", {status: "BLOCKED_BY_SECOND_SIGNER", note: "No distinct controlled signer was available; no third-party identity was fabricated."});
+
+    let settlementTx = "";
+    let externalObservation: any = {observation: "NOT_ATTEMPTED"};
+    if (intent.status === "FULFILLED" && intent.settlement_direction === "RELEASE_TO_COUNTERPARTY") {
+      let instruction = asRecord(await read(client, core, "get_settlement_instruction", ["I-1"]));
+      while (instruction.ready_at && BigInt(instruction.ready_at) > BigInt(nowSeconds())) { console.log(`WAITING_FOR_CHALLENGE_WINDOW=${instruction.ready_at}`); await sleep(POLL_MS); instruction = asRecord(await read(client, core, "get_settlement_instruction", ["I-1"])); }
+      const currentReservation = asRecord(await read(client, vault, "get_reservation", ["I-1"]));
+      if (currentReservation.status === "RESERVED") { const settlement = await executeStep({abi, client, account, state, core, vault, label: "vault:request_release", functionName: "request_release", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => { const current = asRecord(await read(client, core, "get_settlement_instruction", ["I-1"])); if (current.direction !== "RELEASE_TO_COUNTERPARTY" || BigInt(current.ready_at) > BigInt(nowSeconds())) throw new Error("Settlement precondition is not ready"); }, readback: async () => read(client, vault, "get_reservation", ["I-1"]), expectedState: async () => read(client, vault, "get_reservation", ["I-1"])}); settlementTx = settlement.tx; }
+      let triggered: any[] = []; try { triggered = await client.getTriggeredTransactionIds({hash: settlementTx}); } catch (error: any) { externalObservation = {observation: "TRIGGERED_TRANSACTION_QUERY_UNSUPPORTED", error: String(error?.message ?? error)}; }
+      if (!externalObservation.error) externalObservation = {observation: triggered.length ? "TRIGGERED_IDS_OBSERVED" : "PARENT_FINALIZED_CHILD_NOT_EXPOSED", triggeredTransactionIds: triggered};
+    }
+    writeArtifact("external-message-observation.json", {settlementTx: settlementTx || null, ...externalObservation});
+    const finalGlobal = assertAccounting(await read(client, vault, "get_global_accounting"), "Final global");
+    const finalMandateAccounting = assertAccounting(await read(client, vault, "get_accounting", ["M-1"]), "Final mandate");
+    const finalIntent = asRecord(await read(client, core, "get_intent", ["I-1"]));
+    const finalUnassessed = asRecord(await read(client, core, "get_intent", ["I-2"]));
+    const finalAccounting = {global: finalGlobal, mandate: finalMandateAccounting, reservation: await read(client, vault, "get_reservation", ["I-1"]), intent: finalIntent, unassessed: finalUnassessed};
+    writeArtifact("qualification-final-readbacks.json", {core, vault, accounting: finalAccounting, unassessedProof, vectors: {authorization: authorization.vector ?? {}, fulfillment: fulfillment.vector ?? {}}, externalObservation});
+    writeArtifact("qualification-v3-run-summary.json", {status: "COMPLETED_LIVE_FLOW", core, vault, mandateId: "M-1", positiveIntentId: "I-1", unassessedIntentId: "I-2", rootMandateTx: state.steps["core:create_mandate"]?.tx ?? null, settlementTx: settlementTx || null, thirdPartyChallenge: "BLOCKED_BY_SECOND_SIGNER", finalAccounting, externalObservation});
+    console.log("QUALIFICATION_V3_RUN=COMPLETED_LIVE_FLOW");
+  } finally {
+    password = "";
+    signingSecret = "";
+    wallet = null;
+    account = null;
+    client = null;
+  }
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => { console.error(`QUALIFICATION_V3_RUN=STOPPED ${String(error?.message ?? error)}`); writeArtifact("qualification-v3-run-summary.json", {status: "STOPPED", error: String(error?.message ?? error)}); process.exitCode = 1; });
+}

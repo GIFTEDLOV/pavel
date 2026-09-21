@@ -135,6 +135,9 @@ class PavelVault(gl.Contract):
         else:
             self._require(zone[0] == "+" or zone[0] == "-", "malformed transaction timezone")
             body = zone[1:]
+            hour_text = ""
+            minute_text = ""
+            second_text = ""
             if len(body) == 5 and body[2] == ":":
                 hour_text = body[0:2]
                 minute_text = body[3:5]
