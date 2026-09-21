@@ -28,6 +28,8 @@ async function loadPinnedDependencies() {
   const types = await import(pathToFileURL(path.join(cliModules, "genlayer-js", "dist", "types", "index.js")).href);
   const ethers = await import(pathToFileURL(path.join(cliModules, "ethers", "lib.esm", "index.js")).href);
   const inquirer = await import(pathToFileURL(path.join(cliModules, "inquirer", "dist", "esm", "index.js")).href);
+  const prompt = inquirer.default?.prompt ?? inquirer.prompt;
+  if (typeof prompt !== "function") throw new Error("Pinned Inquirer prompt API is unavailable");
   return {
     abi: sdk.abi,
     chains: sdk.chains,
@@ -35,8 +37,29 @@ async function loadPinnedDependencies() {
     createClient: sdk.createClient,
     CalldataAddress: types.CalldataAddress,
     Wallet: ethers.Wallet,
-    prompt: inquirer.prompt,
+    prompt: prompt.bind(inquirer.default ?? inquirer),
   };
+}
+
+export async function requestSubmissionConfirmation(prompt: (questions: unknown[]) => Promise<{submit?: boolean}>, proceed: () => Promise<void>) {
+  let answer: {submit?: boolean};
+  try {
+    answer = await prompt([{
+      type: "confirm",
+      name: "submit",
+      message: "Submit exactly one root Mandate transaction with this typed calldata?",
+      default: false,
+    }]);
+  } catch {
+    console.error("CONFIRMATION_ERROR=NO_SUBMISSION");
+    return {confirmed: false, proceeded: false};
+  }
+  if (answer?.submit !== true) {
+    console.log("SUBMISSION=ABORTED_BY_USER");
+    return {confirmed: false, proceeded: false};
+  }
+  await proceed();
+  return {confirmed: true, proceeded: true};
 }
 
 function sha256(filePath: string) {
@@ -141,38 +164,34 @@ async function main() {
     return;
   }
 
-  const confirm = await prompt([{type: "confirm", name: "submit", message: "Submit exactly one root Mandate transaction with this typed calldata?", default: false}]);
-  if (!confirm.submit) {
-    console.log("SUBMISSION=ABORTED_BY_USER");
-    return;
-  }
+  await requestSubmissionConfirmation(prompt, async () => {
+    const {wallet, accountName} = await loadExistingAccount(Wallet, prompt);
+    const account = createAccount(wallet["private" + "Key"]);
+    const client = createClient({chain: chains.studionet, endpoint: RPC, account});
+    if (account.address.toLowerCase() !== EXPECTED_SIGNER.toLowerCase()) throw new Error("SDK signer address mismatch");
 
-  const {wallet, accountName} = await loadExistingAccount(Wallet, prompt);
-  const account = createAccount(wallet["private" + "Key"]);
-  const client = createClient({chain: chains.studionet, endpoint: RPC, account});
-  if (account.address.toLowerCase() !== EXPECTED_SIGNER.toLowerCase()) throw new Error("SDK signer address mismatch");
-
-  const tx = await client.writeContract({address: CORE, functionName: METHOD, args, value: 0n, account});
-  const artifactDir = path.join(ROOT, "artifacts", "studionet", "qualification-v2");
-  mkdirSync(artifactDir, {recursive: true});
-  writeFileSync(path.join(artifactDir, "root-mandate-sdk-submission.json"), JSON.stringify({
-    network: "studionet",
-    rpc: RPC,
-    chainId: CHAIN_ID,
-    signer: EXPECTED_SIGNER.toLowerCase(),
-    accountName,
-    core: CORE,
-    vault: VAULT,
-    method: METHOD,
-    args: [{type: "Address", value: EXPECTED_SIGNER.toLowerCase()}, ""],
-    proof,
-    tx,
-    submissionCount: 1,
-    tracking: "NOT_STARTED_BY_HELPER",
-  }, null, 2));
-  console.log(`TRANSACTION_HASH=${tx}`);
-  console.log("SUBMISSION_COUNT=1");
-  console.log("AUTO_RETRY=NO");
+    const tx = await client.writeContract({address: CORE, functionName: METHOD, args, value: 0n, account});
+    const artifactDir = path.join(ROOT, "artifacts", "studionet", "qualification-v2");
+    mkdirSync(artifactDir, {recursive: true});
+    writeFileSync(path.join(artifactDir, "root-mandate-sdk-submission.json"), JSON.stringify({
+      network: "studionet",
+      rpc: RPC,
+      chainId: CHAIN_ID,
+      signer: EXPECTED_SIGNER.toLowerCase(),
+      accountName,
+      core: CORE,
+      vault: VAULT,
+      method: METHOD,
+      args: [{type: "Address", value: EXPECTED_SIGNER.toLowerCase()}, ""],
+      proof,
+      tx,
+      submissionCount: 1,
+      tracking: "NOT_STARTED_BY_HELPER",
+    }, null, 2));
+    console.log(`TRANSACTION_HASH=${tx}`);
+    console.log("SUBMISSION_COUNT=1");
+    console.log("AUTO_RETRY=NO");
+  });
 }
 
-await main();
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
