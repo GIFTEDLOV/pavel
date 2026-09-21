@@ -113,10 +113,19 @@ function readFixture(): Fixture { return JSON.parse(readFileSync(FIXTURE_PATH, "
 function nowSeconds() { return Math.floor(Date.now() / 1000); }
 function sha256File(filePath: string) { return createHash("sha256").update(readFileSync(filePath)).digest("hex"); }
 function sha256Text(value: string) { return createHash("sha256").update(Buffer.from(value, "utf8")).digest("hex"); }
-function normalizeAddress(value: unknown) {
+export function normalizeAddressValue(value: unknown) {
   const text = String(value ?? "").trim().toLowerCase();
-  if (!/^0x[0-9a-f]{40}$/.test(text) || /^0x0{40}$/.test(text)) return "";
+  return /^0x[0-9a-f]{40}$/.test(text) ? text : "";
+}
+function normalizeAddress(value: unknown) {
+  const text = normalizeAddressValue(value);
+  if (!text || /^0x0{40}$/.test(text)) return "";
   return text;
+}
+export function sameAddress(left: unknown, right: unknown) {
+  const normalizedLeft = normalizeAddressValue(left);
+  const normalizedRight = normalizeAddressValue(right);
+  return normalizedLeft !== "" && normalizedLeft === normalizedRight;
 }
 function preserveAddress(value: unknown) {
   const text = String(value ?? "").trim();
@@ -209,8 +218,9 @@ function assertMandate(mandate: Record<string, any>, fixture: Fixture, status?: 
     fulfillment_policy: fixture.fulfillmentPolicy, recovery_policy: fixture.recoveryPolicy, allow_prior_reservations: false,
   };
   for (const [field, expectedValue] of Object.entries(expected)) {
-    const actual = ["principal", "authorized_agent"].includes(field) ? asText(mandate[field]).toLowerCase() : mandate[field];
-    if (actual !== expectedValue) throw new Error(`M-1 readback mismatch for ${field}: expected ${String(expectedValue)}, got ${String(actual)}`);
+    const addressField = ["principal", "authorized_agent"].includes(field);
+    const actual = addressField ? asText(mandate[field]) : mandate[field];
+    if (addressField ? !sameAddress(actual, expectedValue) : actual !== expectedValue) throw new Error(`M-1 readback mismatch for ${field}: expected ${String(expectedValue)}, got ${String(actual)}`);
   }
   if (status && mandate.status !== status) throw new Error(`M-1 status mismatch: expected ${status}, got ${mandate.status}`);
   if (status === "SEALED" && asText(mandate.definition_hash) === "") throw new Error("M-1 sealed policy fingerprint is missing");
@@ -219,8 +229,9 @@ function assertMandate(mandate: Record<string, any>, fixture: Fixture, status?: 
 function assertIntent(intent: Record<string, any>, fixture: Fixture) {
   const expected: Record<string, any> = {mandate_id: "M-1", agent: EXPECTED_SIGNER, principal: EXPECTED_SIGNER, recipient: EXPECTED_SIGNER, counterparty_identity_id: "C-1", amount: "1", purpose: fixture.purpose, deliverable: fixture.deliverable, commercial_terms: fixture.commercialTerms, fulfillment_criteria: fixture.fulfillmentCriteria};
   for (const [field, value] of Object.entries(expected)) {
-    const actual = ["agent", "principal", "recipient"].includes(field) ? asText(intent[field]).toLowerCase() : intent[field];
-    if (actual !== value) throw new Error(`Intent readback mismatch for ${field}`);
+    const addressField = ["agent", "principal", "recipient"].includes(field);
+    const actual = addressField ? asText(intent[field]) : intent[field];
+    if (addressField ? !sameAddress(actual, value) : actual !== value) throw new Error(`Intent readback mismatch for ${field}`);
   }
   if (asText(intent.intent_fingerprint) === "") throw new Error("Intent fingerprint is missing");
 }
@@ -331,6 +342,23 @@ function persistedDeploymentCode(step: any) {
     const entry = document.transactions?.find((item: any) => item.tx === step.tx);
     return contractCodeFromFinalizedReceipt(entry?.receipt);
   } catch { return ""; }
+}
+function persistedDeploymentReceipt(step: any) {
+  if (!step?.tx) return null;
+  const transactionPath = path.join(ARTIFACT_DIR, "transactions.json");
+  if (!existsSync(transactionPath)) return null;
+  try {
+    const document = JSON.parse(readFileSync(transactionPath, "utf8"));
+    return document.transactions?.find((item: any) => item.tx === step.tx)?.receipt ?? null;
+  } catch { return null; }
+}
+function deploymentConstructorAddress(step: any) {
+  const receipt = persistedDeploymentReceipt(step);
+  const raw = receipt?.data?.calldata?.raw;
+  if (Array.isArray(raw) && raw.length >= 20) return `0x${Buffer.from(raw.slice(-20)).toString("hex")}`;
+  const readable = receipt?.data?.calldata?.readable;
+  const match = typeof readable === "string" ? readable.match(/addr#([0-9a-fA-F]{40})/) : null;
+  return match ? `0x${match[1]}` : "";
 }
 function persistedDeploymentAddress(step: any) {
   const direct = authoritativeDeploymentAddress(step?.receipt);
@@ -499,7 +527,7 @@ async function schemaParity(client: any, core: string, vault: string, coreCode =
   if (existsSync(cachePath)) {
     try {
       const cached = JSON.parse(readFileSync(cachePath, "utf8"));
-      if (cached.coreAddress?.toLowerCase() === core.toLowerCase() && cached.vaultAddress?.toLowerCase() === vault.toLowerCase() && cached.sourceHashes?.core === CORE_SHA && cached.sourceHashes?.vault === VAULT_SHA) {
+      if (sameAddress(cached.coreAddress, core) && sameAddress(cached.vaultAddress, vault) && cached.sourceHashes?.core === CORE_SHA && cached.sourceHashes?.vault === VAULT_SHA) {
         const serialized = JSON.stringify(cached.schemas);
         for (const name of [...cached.coreRequired, ...cached.vaultRequired]) if (!serialized.includes(name)) throw new Error(`Cached schema is missing required interface method ${name}`);
         writeArtifact("live-interface-parity.json", cached.schemas);
@@ -527,21 +555,29 @@ async function schemaParity(client: any, core: string, vault: string, coreCode =
   return summary;
 }
 async function prepareBindingPreflight(abi: any, client: any, state: State, core: string, vault: string, CalldataAddress: new (bytes: Uint8Array) => unknown) {
-  const coreOwner = asText(await read(client, core, "get_owner")).toLowerCase();
-  const coreVault = asText(await read(client, core, "get_vault_address")).toLowerCase();
-  const vaultCore = asText(await read(client, vault, "get_core_address")).toLowerCase();
+  const coreOwner = asText(await read(client, core, "get_owner"));
+  const coreVault = asText(await read(client, core, "get_vault_address"));
+  const vaultCore = asText(await read(client, vault, "get_core_address"));
+  const historyLength = Number(asText(await read(client, vault, "get_history_length")));
+  const history: string[] = [];
+  for (let index = 0; index < historyLength; index += 1) history.push(asText(await read(client, vault, "get_history_item", [BigInt(index)])));
   const accounting = assertAccounting(await read(client, vault, "get_global_accounting"), "Initial global");
-  if (coreOwner !== EXPECTED_SIGNER || vaultCore !== core.toLowerCase()) throw new Error("V3 binding preflight authority or constructor state mismatch");
+  const constructorCore = deploymentConstructorAddress(state.steps["deploy:vault"]);
+  const boundByHistory = history.some((item) => { try { return asRecord(item).event === "CORE_BOUND"; } catch { return false; } });
+  if (!constructorCore || !sameAddress(constructorCore, core)) throw new Error("V3 Vault constructor Core argument does not match the expected Core");
+  if (!sameAddress(coreOwner, EXPECTED_SIGNER) || !sameAddress(vaultCore, core)) throw new Error("V3 binding preflight authority or constructor state mismatch");
   const zero = "0x0000000000000000000000000000000000000000";
   let nextWrite = "binding-complete";
-  if (coreVault === zero) nextWrite = "vault:bind_core";
-  else if (coreVault !== vault.toLowerCase()) throw new Error("V3 Core has an unexpected nonzero Vault address");
-  else nextWrite = "core:set_vault_address";
+  if (normalizeAddressValue(coreVault) === zero && !boundByHistory) nextWrite = "vault:bind_core";
+  else if (normalizeAddressValue(coreVault) === zero && boundByHistory) nextWrite = "core:set_vault_address";
+  else if (!sameAddress(coreVault, vault)) throw new Error("V3 Core has an unexpected nonzero Vault address");
+  else nextWrite = "binding-complete";
   const proof = {
     "vault:bind_core": calldataProof(abi, "bind_core", []),
     "core:set_vault_address": calldataProof(abi, "set_vault_address", [address(CalldataAddress, vault)]),
   };
-  const preflight = {status: "PASS", nextWrite, core, vault, coreOwner, coreVault, vaultCore, initialAccounting: accounting, typedCalldata: proof};
+  const preflight = {status: "PASS", nextWrite, core, vault, coreOwner, coreVault, vaultCore, constructorCore, historyLength, history, vaultBoundState: boundByHistory ? "BOUND" : "UNBOUND", vaultBoundStateSource: "CORE_BOUND history event", bindCoreRequired: !boundByHistory, normalized: {constructorCore: normalizeAddressValue(constructorCore), coreOwner: normalizeAddressValue(coreOwner), coreVault: normalizeAddressValue(coreVault), vaultCore: normalizeAddressValue(vaultCore), expectedCore: normalizeAddressValue(core), expectedVault: normalizeAddressValue(vault)}, initialAccounting: accounting, typedCalldata: proof};
+  writeArtifact("vault-binding-diagnosis.json", {vaultConstructorCoreArg: constructorCore, vaultCoreAddressReadback: vaultCore, expectedCoreAddress: core, normalizedAddressMatch: sameAddress(constructorCore, core) && sameAddress(vaultCore, core), vaultBoundState: preflight.vaultBoundState, bindCoreRequired: preflight.bindCoreRequired, history, initialAccounting: accounting});
   writeArtifact("binding-preflight.json", preflight);
   state.observations.bindingPreflight = preflight;
   saveState(state);
@@ -614,7 +650,7 @@ async function main() {
   let bindingPreflight: any = state.observations.bindingPreflight;
   if (!state.observations.binding?.status) bindingPreflight = await prepareBindingPreflight(abi, readClient, state, state.core, state.vault, CalldataAddress);
   const selectedKeystore = findExpectedKeystore();
-  if (selectedKeystore.address.toLowerCase() !== EXPECTED_SIGNER) throw new Error("Expected qualification keystore resolution failed");
+  if (!sameAddress(selectedKeystore.address, EXPECTED_SIGNER)) throw new Error("Expected qualification keystore resolution failed");
   const nonce = await RPC_SCHEDULER.enqueue("deployer-nonce", () => readClient.getCurrentNonce({address: EXPECTED_SIGNER}), true);
   const plan = {qualificationVersion: "qualification-v3", network: "studionet", rpc: RPC, chainId: CHAIN_ID, signer: EXPECTED_SIGNER, selectedKeystore: {name: selectedKeystore.name, address: selectedKeystore.address}, sourceHashes: {core: CORE_SHA, vault: VAULT_SHA}, fixture: {validFrom: fixture.validFrom, expiresAt: fixture.expiresAt, amount: "1", authority: fixture.authority}, checkpoint: {core: state.core ?? null, vault: state.vault ?? null, steps: Object.keys(state.steps)}, deployerNonce: String(nonce), nextUnfinishedWrite: bindingPreflight?.nextWrite ?? "unknown", rpcScheduler: RPC_SCHEDULER.snapshot(), explicitAuthorization: "user-authorized-qualification-v3"};
   writeArtifact("qualification-v3-run-plan.json", plan);
@@ -633,7 +669,7 @@ async function main() {
     wallet = loaded.wallet;
     signingSecret = wallet["private" + "Key"];
     account = createAccount(signingSecret);
-    if (account.address.toLowerCase() !== EXPECTED_SIGNER) throw new Error("Decrypted signer does not match qualification signer");
+    if (!sameAddress(account.address, EXPECTED_SIGNER)) throw new Error("Decrypted signer does not match qualification signer");
     client = createClient({chain: chains.studionet, endpoint: RPC, account});
     await client.initializeConsensusSmartContract();
     writeArtifact("qualification-v3-run-status.json", {status: "ACTIVE_IN_MEMORY", selectedKeystore: {name: selectedKeystore.name, address: selectedKeystore.address}, noTransactionSubmitted: true});
@@ -656,9 +692,9 @@ async function main() {
     if (!cachedSourceParity(state.steps["deploy:vault"], vault, VAULT_SHA)) await deployedSourceParity(client, vault, VAULT_SHA, 3, POLL_MS, persistedDeploymentCode(state.steps["deploy:vault"]));
     const bindingNeedsVaultWrite = bindingPreflight?.nextWrite === "vault:bind_core" || Boolean(state.steps["vault:bind_core"]?.tx);
     const bindingNeedsCoreWrite = bindingNeedsVaultWrite || bindingPreflight?.nextWrite === "core:set_vault_address" || Boolean(state.steps["core:set_vault_address"]?.tx);
-    if (bindingNeedsVaultWrite) await executeStep({abi, client, account, state, core, vault, label: "vault:bind_core", functionName: "bind_core", args: [], summary: [], precondition: async () => { if (asText(await read(client, vault, "get_core_address")).toLowerCase() !== core) throw new Error("Vault Core constructor binding changed"); }, readback: async () => read(client, vault, "get_core_address"), expectedState: async () => { if (asText(await read(client, vault, "get_core_address")).toLowerCase() !== core) throw new Error("Vault Core binding was not finalized"); return {core}; }});
-    if (bindingNeedsCoreWrite) await executeStep({abi, client, account, state, core, vault, label: "core:set_vault_address", functionName: "set_vault_address", args: [address(CalldataAddress, vault)], summary: [{type: "Address", value: vault}], precondition: async () => { if (asText(await read(client, core, "get_vault_address")).toLowerCase() !== "0x0000000000000000000000000000000000000000") throw new Error("Core Vault address is no longer unbound without a checkpoint"); }, readback: async () => read(client, core, "get_vault_address"), expectedState: async () => { if (asText(await read(client, core, "get_vault_address")).toLowerCase() !== vault) throw new Error("Core Vault binding was not finalized"); return {vault}; }});
-    if (asText(await read(client, core, "get_vault_address")).toLowerCase() !== vault || asText(await read(client, vault, "get_core_address")).toLowerCase() !== core) throw new Error("Bidirectional binding readback failed");
+    if (bindingNeedsVaultWrite) await executeStep({abi, client, account, state, core, vault, label: "vault:bind_core", functionName: "bind_core", args: [], summary: [], precondition: async () => { if (!sameAddress(await read(client, vault, "get_core_address"), core)) throw new Error("Vault Core constructor binding changed"); }, readback: async () => read(client, vault, "get_core_address"), expectedState: async () => { if (!sameAddress(await read(client, vault, "get_core_address"), core)) throw new Error("Vault Core binding was not finalized"); return {core}; }});
+    if (bindingNeedsCoreWrite) await executeStep({abi, client, account, state, core, vault, label: "core:set_vault_address", functionName: "set_vault_address", args: [address(CalldataAddress, vault)], summary: [{type: "Address", value: vault}], precondition: async () => { if (normalizeAddressValue(await read(client, core, "get_vault_address")) !== "0x0000000000000000000000000000000000000000") throw new Error("Core Vault address is no longer unbound without a checkpoint"); }, readback: async () => read(client, core, "get_vault_address"), expectedState: async () => { if (!sameAddress(await read(client, core, "get_vault_address"), vault)) throw new Error("Core Vault binding was not finalized"); return {vault}; }});
+    if (!sameAddress(await read(client, core, "get_vault_address"), vault) || !sameAddress(await read(client, vault, "get_core_address"), core)) throw new Error("Bidirectional binding readback failed");
     state.observations.binding = {core, vault, status: "PASS"}; state.observations.schema = schema; saveState(state);
 
     await executeStep({abi, client, account, state, core, vault, label: "core:register_principal", functionName: "register_principal", args: [], summary: [], precondition: async () => {}, readback: async () => ({registered: true}), expectedState: async () => ({registered: true})});
@@ -672,9 +708,9 @@ async function main() {
       const map = decoded instanceof Map ? decoded : new Map(Object.entries(decoded));
       const decodedArgs: any[] = map.get("args");
       const arg0Value = decodedArgs?.[0]?.bytes ? `0x${Buffer.from(decodedArgs[0].bytes).toString("hex")}` : "";
-      if (proof.argumentCount !== 2 || arg0Value !== EXPECTED_SIGNER || typeof decodedArgs?.[1] !== "string" || decodedArgs[1] !== "") throw new Error("Root mandate typed calldata boundary proof failed");
+      if (proof.argumentCount !== 2 || !sameAddress(arg0Value, EXPECTED_SIGNER) || typeof decodedArgs?.[1] !== "string" || decodedArgs[1] !== "") throw new Error("Root mandate typed calldata boundary proof failed");
       console.log(`METHOD=create_mandate\nARG_COUNT=2\nARG0_TYPE=Address\nARG0_VALUE=${arg0Value}\nARG1_TYPE=string\nARG1_LENGTH=0\nEMPTY_STRING_PRESERVED=YES\nMANDATE_COUNT=${await read(client, core, "get_mandate_count")}`);
-      await executeStep({abi, client, account, state, core, vault, label: "core:create_mandate", functionName: "create_mandate", args, summary: [{type: "Address", value: EXPECTED_SIGNER}, {type: "string", value: "", utf8Length: 0}], precondition: async () => { if (asText(await read(client, core, "get_mandate_count")) !== "0") throw new Error("Root mandate precondition is no longer zero"); }, readback: async () => read(client, core, "get_mandate", ["M-1"]), expectedState: async () => { if (asText(await read(client, core, "get_mandate_count")) !== "1") throw new Error("Finalized root mandate count is not one"); const item = asRecord(await read(client, core, "get_mandate", ["M-1"])); if (asText(item.principal).toLowerCase() !== EXPECTED_SIGNER || asText(item.authorized_agent).toLowerCase() !== EXPECTED_SIGNER || item.parent_mandate_id !== "") throw new Error("Finalized root mandate identity is incorrect"); return item; }});
+      await executeStep({abi, client, account, state, core, vault, label: "core:create_mandate", functionName: "create_mandate", args, summary: [{type: "Address", value: EXPECTED_SIGNER}, {type: "string", value: "", utf8Length: 0}], precondition: async () => { if (asText(await read(client, core, "get_mandate_count")) !== "0") throw new Error("Root mandate precondition is no longer zero"); }, readback: async () => read(client, core, "get_mandate", ["M-1"]), expectedState: async () => { if (asText(await read(client, core, "get_mandate_count")) !== "1") throw new Error("Finalized root mandate count is not one"); const item = asRecord(await read(client, core, "get_mandate", ["M-1"])); if (!sameAddress(item.principal, EXPECTED_SIGNER) || !sameAddress(item.authorized_agent, EXPECTED_SIGNER) || item.parent_mandate_id !== "") throw new Error("Finalized root mandate identity is incorrect"); return item; }});
       mandate = asRecord(await read(client, core, "get_mandate", ["M-1"]));
     }
     if (!Object.keys(mandate).length) throw new Error("M-1 was not created");
@@ -693,11 +729,11 @@ async function main() {
 
     let counterparty = asRecord(await read(client, core, "get_counterparty", ["C-1"]));
     if (!Object.keys(counterparty).length) {
-      if (String(fixture.counterpartyWallet).toLowerCase() !== EXPECTED_SIGNER) throw new Error("Fixture counterparty is not the controlled qualification signer");
-      await executeStep({abi, client, account, state, core, vault, label: "core:register_counterparty", functionName: "register_counterparty", args: [address(CalldataAddress, EXPECTED_SIGNER), fixture.counterpartyLabel, fixture.authority], summary: [{type: "Address", value: EXPECTED_SIGNER}, {type: "string", value: fixture.counterpartyLabel}, {type: "string", value: fixture.authority}], precondition: async () => {}, readback: async () => read(client, core, "get_counterparty", ["C-1"]), expectedState: async () => { const item = asRecord(await read(client, core, "get_counterparty", ["C-1"])); if (item.bound_wallet?.toLowerCase() !== EXPECTED_SIGNER || item.authority_origin !== fixture.authority || item.label !== fixture.counterpartyLabel || item.active !== true) throw new Error("Counterparty state was not finalized"); return item; }});
+      if (!sameAddress(fixture.counterpartyWallet, EXPECTED_SIGNER)) throw new Error("Fixture counterparty is not the controlled qualification signer");
+      await executeStep({abi, client, account, state, core, vault, label: "core:register_counterparty", functionName: "register_counterparty", args: [address(CalldataAddress, EXPECTED_SIGNER), fixture.counterpartyLabel, fixture.authority], summary: [{type: "Address", value: EXPECTED_SIGNER}, {type: "string", value: fixture.counterpartyLabel}, {type: "string", value: fixture.authority}], precondition: async () => {}, readback: async () => read(client, core, "get_counterparty", ["C-1"]), expectedState: async () => { const item = asRecord(await read(client, core, "get_counterparty", ["C-1"])); if (!sameAddress(item.bound_wallet, EXPECTED_SIGNER) || item.authority_origin !== fixture.authority || item.label !== fixture.counterpartyLabel || item.active !== true) throw new Error("Counterparty state was not finalized"); return item; }});
       counterparty = asRecord(await read(client, core, "get_counterparty", ["C-1"]));
     }
-    if (counterparty.bound_wallet?.toLowerCase() !== EXPECTED_SIGNER || counterparty.authority_origin !== fixture.authority || counterparty.label !== fixture.counterpartyLabel || counterparty.active !== true) throw new Error("Counterparty identity readback mismatch");
+    if (!sameAddress(counterparty.bound_wallet, EXPECTED_SIGNER) || counterparty.authority_origin !== fixture.authority || counterparty.label !== fixture.counterpartyLabel || counterparty.active !== true) throw new Error("Counterparty identity readback mismatch");
 
     const beforeAccounting = assertAccounting(await read(client, vault, "get_accounting", ["M-1"]), "Pre-deposit mandate");
     if (BigInt(beforeAccounting.deposited) < 1n) {
@@ -728,7 +764,7 @@ async function main() {
 
     let reservation = asText(await read(client, vault, "get_reservation", ["I-1"]));
     if (!reservation) { await executeStep({abi, client, account, state, core, vault, label: "vault:reserve:positive", functionName: "reserve", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => { const auth = asRecord(await read(client, core, "get_authorization_for_vault", ["I-1"])); if (auth.authorization_decision !== "AUTHORIZED") throw new Error("Vault reserve precondition is not authorized"); }, readback: async () => read(client, vault, "get_reservation", ["I-1"]), expectedState: async () => read(client, vault, "get_reservation", ["I-1"])}); reservation = asText(await read(client, vault, "get_reservation", ["I-1"])); }
-    const reservationItem = asRecord(reservation); if (reservationItem.status !== "RESERVED" || reservationItem.intent_id !== "I-1" || reservationItem.mandate_id !== "M-1" || reservationItem.amount !== "1" || reservationItem.recipient?.toLowerCase() !== EXPECTED_SIGNER) throw new Error("Positive reservation readback mismatch");
+    const reservationItem = asRecord(reservation); if (reservationItem.status !== "RESERVED" || reservationItem.intent_id !== "I-1" || reservationItem.mandate_id !== "M-1" || reservationItem.amount !== "1" || !sameAddress(reservationItem.recipient, EXPECTED_SIGNER)) throw new Error("Positive reservation readback mismatch");
 
     let intent2 = asRecord(await read(client, core, "get_intent", ["I-2"]));
     if (!Object.keys(intent2).length) { const args = ["M-1", "C-1", address(CalldataAddress, EXPECTED_SIGNER), 1n, "Qualification-v3 unassessed proof", fixture.purpose, fixture.deliverable, fixture.commercialTerms, fixture.fulfillmentCriteria, BigInt(intentExpiresAt)]; await executeStep({abi, client, account, state, core, vault, label: "core:create_intent:unassessed", functionName: "create_intent", args, summary: [{type: "intent", id: "I-2", state: "DRAFT"}], precondition: async () => {}, readback: async () => read(client, core, "get_intent", ["I-2"]), expectedState: async () => read(client, core, "get_intent", ["I-2"])}); intent2 = asRecord(await read(client, core, "get_intent", ["I-2"])); }

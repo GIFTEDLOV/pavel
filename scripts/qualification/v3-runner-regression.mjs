@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {readFileSync} from "node:fs";
 
-const {inspectResults, QualificationRpcScheduler} = await import("./run-v3.ts");
+const {inspectResults, QualificationRpcScheduler, sameAddress} = await import("./run-v3.ts");
 const source = readFileSync(new URL("./run-v3.ts", import.meta.url), "utf8");
 
 test("v3 separates consensus result 6 from execution result", () => {
@@ -81,6 +81,20 @@ test("v3 runner caches immutable schema and performs binding preflight before pa
   assert.match(source, /nextUnfinishedWrite/);
   assert.match(source, /AWAITING_SECURE_KEYSTORE_PASSWORD/);
   assert.ok(source.indexOf("prepareBindingPreflight") < source.indexOf("AWAITING_SECURE_KEYSTORE_PASSWORD"));
+});
+
+test("v3 address invariants compare 20-byte values independent of casing", () => {
+  assert.equal(sameAddress("0x269966b007629e4eb6e55f8f96641a8735622c00", "0x269966b007629e4eb6E55F8f96641A8735622c00"), true);
+  assert.equal(sameAddress("0x64532d574553b49df548d647c959cbd26f7c532b", "0x64532d574553B49Df548D647c959cbd26f7C532b"), true);
+  assert.equal(sameAddress("0x269966b007629e4eb6e55f8f96641a8735622c00", "0x64532d574553b49df548d647c959cbd26f7c532b"), false);
+});
+
+test("binding constructor-state invariant is read before the password prompt", () => {
+  assert.match(source, /deploymentConstructorAddress\(state\.steps\[\"deploy:vault\"\]\)/);
+  assert.match(source, /vaultBoundState/);
+  assert.match(source, /bindCoreRequired/);
+  assert.doesNotMatch(source, /get_core_address\"\)\)\.toLowerCase\(\) !== core/);
+  assert.ok(source.indexOf("prepareBindingPreflight") < source.indexOf("const selectedKeystore"));
 });
 
 test("v3 runner retains deployment checkpoints and excludes finalize helper records", () => {
