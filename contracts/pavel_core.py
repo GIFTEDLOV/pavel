@@ -214,7 +214,15 @@ class PavelCore(gl.Contract):
             days = days + u256(1)
         days = days + day - u256(1)
         offset = 0
-        zone = raw[19:]
+        zone_start = 19
+        if len(raw) > zone_start and raw[zone_start] == ".":
+            fraction_start = zone_start + 1
+            fraction_end = fraction_start
+            while fraction_end < len(raw) and raw[fraction_end] in "0123456789":
+                fraction_end = fraction_end + 1
+            self._require(fraction_end > fraction_start, "malformed transaction fractional seconds")
+            zone_start = fraction_end
+        zone = raw[zone_start:]
         if zone == "Z" or zone == "":
             offset = 0
         else:

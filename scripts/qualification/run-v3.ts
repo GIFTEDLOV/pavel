@@ -260,6 +260,35 @@ export function inspectResults(receipt: any) {
   if (validators.length && validators.every((item: string) => item === "ERROR")) return {consensusStatus, consensusResult, executionResult: "ERROR", executionResultSource: "consensus_data.validators.execution_result"};
   return {consensusStatus, consensusResult, executionResult: "UNKNOWN", executionResultSource: "unavailable"};
 }
+export async function collectExecutionDiagnostics(client: any, tx: string, receipt: any) {
+  const safeRead = async (label: string, action: () => Promise<any>) => {
+    try { return {supported: true, value: await RPC_SCHEDULER.enqueue(`error:${tx}:${label}`, action, true)}; }
+    catch (error: any) { return {supported: false, error: String(error?.message ?? error)}; }
+  };
+  const leader = Array.isArray(receipt?.consensus_data?.leader_receipt) ? receipt.consensus_data.leader_receipt : Array.isArray(receipt?.leader_receipt) ? receipt.leader_receipt : [];
+  const validators = Array.isArray(receipt?.consensus_data?.validators) ? receipt.consensus_data.validators : [];
+  const leaderPayload = leader.find((item: any) => item?.result?.payload)?.result?.payload ?? "";
+  const diagnostic = {
+    tx,
+    consensusStatus: receipt?.statusName ?? receipt?.status,
+    consensusResult: receipt?.result_name ?? receipt?.resultName ?? receipt?.result,
+    txExecutionResultName: receipt?.txExecutionResultName ?? receipt?.tx_execution_result_name ?? "UNAVAILABLE",
+    executionResult: inspectResults(receipt).executionResult,
+    executionResultSource: inspectResults(receipt).executionResultSource,
+    exceptionType: leaderPayload ? "GenVM.UserError_OR_RUNTIME_ERROR" : "UNAVAILABLE",
+    exceptionMessage: leaderPayload,
+    leader: leader.map((item: any) => ({result: item?.result, genvmResult: item?.genvm_result, executionStats: item?.execution_stats, calldata: item?.calldata})),
+    validators: validators.map((item: any) => ({vote: item?.vote, result: item?.result, genvmResult: item?.genvm_result, executionStats: item?.execution_stats, address: item?.node_config?.address})),
+    traceSurfaces: {
+      gen_getTransactionReceipt: await safeRead("gen_getTransactionReceipt", () => client.request({method: "gen_getTransactionReceipt", params: [tx]})),
+      clientGetTransactionReceipt: await safeRead("clientGetTransactionReceipt", () => client.getTransactionReceipt({hash: tx})),
+      clientDebugTraceTransaction: await safeRead("clientDebugTraceTransaction", () => client.debugTraceTransaction({hash: tx, round: 0})),
+      debugTraceTransaction: await safeRead("debugTraceTransaction", () => client.request({method: "debug_traceTransaction", params: [tx, {round: 0}]})),
+    },
+  };
+  writeArtifact(`execution-error-${tx.slice(2, 14)}.json`, diagnostic);
+  return diagnostic;
+}
 async function reconcile(client: any, tx: string, account: any, expectedState?: () => Promise<any>) {
   let finalizationTx: string | undefined;
   for (let attempt = 1; attempt <= MAX_POLLS; attempt += 1) {
@@ -273,7 +302,10 @@ async function reconcile(client: any, tx: string, account: any, expectedState?: 
       const observation = inspectResults(receipt);
       let lifecycle = receipt.lifecycle ?? status;
       try { lifecycle = await rawRpc("gen_getTransactionStatus", [tx]); } catch { /* pinned Studionet may omit auxiliary status */ }
-      if (observation.executionResult === "ERROR") throw new Error(`Transaction ${tx} finalized with explicit execution ERROR (${observation.executionResultSource})`);
+      if (observation.executionResult === "ERROR") {
+        const diagnostic = await collectExecutionDiagnostics(client, tx, receipt);
+        throw new Error(`Transaction ${tx} finalized with explicit execution ERROR (${observation.executionResultSource}): ${diagnostic.exceptionMessage || "no concrete leader error payload"}`);
+      }
       if (observation.executionResult === "SUCCESS") return {receipt, ...observation, lifecycle, outcome: "SUCCESS"};
       if (!expectedState) throw new Error(`Transaction ${tx} finalized with UNKNOWN execution and no expected state fallback`);
       let readback: any;
@@ -311,7 +343,7 @@ async function executeStep(config: {abi: any; client: any; account: any; state: 
   }
   let result: any;
   try { result = await reconcile(client, tx, account, expectedState); }
-  catch (error: any) { state.steps[label] = {...state.steps[label], label, tx, status: "ERROR", error: String(error?.message ?? error)}; saveState(state); writeArtifact("last-lifecycle-step.json", state.steps[label]); throw error; }
+  catch (error: any) { state.steps[label] = {...state.steps[label], label, tx, status: "ERROR", error: String(error?.message ?? error)}; saveState(state); appendTransaction({kind: label, tx, status: "ERROR", executionResult: "ERROR", error: String(error?.message ?? error)}); writeArtifact("last-lifecycle-step.json", state.steps[label]); throw error; }
   const rb = await readback();
   state.steps[label] = {...state.steps[label], label, tx, status: "COMPLETE", execution: result.executionResult, executionResult: result.executionResult, outcome: result.outcome, lifecycle: result.lifecycle, readback: rb};
   saveState(state);
@@ -649,6 +681,10 @@ async function main() {
   state.observations.schema = schema;
   let bindingPreflight: any = state.observations.bindingPreflight;
   if (!state.observations.binding?.status) bindingPreflight = await prepareBindingPreflight(abi, readClient, state, state.core, state.vault, CalldataAddress);
+  if (state.steps["core:create_mandate"]?.status === "ERROR") {
+    writeArtifact("qualification-v3-run-status.json", {status: "BLOCKED_DEPLOYED_SOURCE_DEFECT", noTransactionSubmitted: true, failedStep: "core:create_mandate", nextUnfinishedWrite: "replacement-deployment-requires-explicit-authorization"});
+    throw new Error("Qualification-v3 cannot continue: deployed Core has a finalized create_mandate source error; replacement deployment requires explicit authorization");
+  }
   const selectedKeystore = findExpectedKeystore();
   if (!sameAddress(selectedKeystore.address, EXPECTED_SIGNER)) throw new Error("Expected qualification keystore resolution failed");
   const nonce = await RPC_SCHEDULER.enqueue("deployer-nonce", () => readClient.getCurrentNonce({address: EXPECTED_SIGNER}), true);

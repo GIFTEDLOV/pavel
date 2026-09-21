@@ -103,3 +103,11 @@ test("v3 runner retains deployment checkpoints and excludes finalize helper reco
   assert.match(source, /startsWith\("finalize:"\)/);
   assert.match(source, /if \(!tx\)/);
 });
+
+test("v3 execution errors persist concrete diagnostics without retrying", () => {
+  assert.match(source, /collectExecutionDiagnostics/);
+  assert.match(source, /execution-error-\$\{tx\.slice/);
+  assert.match(source, /debug_traceTransaction/);
+  assert.match(source, /appendTransaction\(\{kind: label, tx, status: "ERROR"/);
+  assert.match(source, /source error; replacement deployment requires explicit authorization/);
+});
