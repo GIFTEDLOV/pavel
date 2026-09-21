@@ -52,6 +52,11 @@ function normalizeAddress(value: unknown) {
   if (!/^0x[0-9a-f]{40}$/.test(text) || /^0x0{40}$/.test(text)) return "";
   return text;
 }
+function preserveAddress(value: unknown) {
+  const text = String(value ?? "").trim();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(text) || /^0x0{40}$/i.test(text)) return "";
+  return text;
+}
 function addressBytes(value: string) { return Uint8Array.from(Buffer.from(value.slice(2), "hex")); }
 function address(CalldataAddress: new (bytes: Uint8Array) => unknown, value: string) { return new CalldataAddress(addressBytes(value)); }
 function asText(value: any) { return typeof value === "string" ? value : String(value ?? ""); }
@@ -79,6 +84,12 @@ function appendTransaction(entry: Record<string, any>) {
   writeArtifact("transactions.json", doc);
 }
 function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+async function rawRpc(method: string, params: any[]) {
+  const response = await fetch(RPC, {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({jsonrpc: "2.0", id: Date.now(), method, params})});
+  const payload: any = await response.json();
+  if (payload.error) throw new Error(`${payload.error.message ?? "RPC error"}${payload.error.data ? `: ${JSON.stringify(payload.error.data)}` : ""}`);
+  return payload.result;
+}
 function read(client: any, target: string, functionName: string, args: any[] = []) {
   return client.readContract({address: target, functionName, args, account: EXPECTED_SIGNER});
 }
@@ -173,13 +184,15 @@ async function reconcile(client: any, tx: string, account: any, expectedState?: 
     const status = String(receipt.statusName ?? receipt.status ?? "");
     if (status === "FINALIZED") {
       const observation = inspectResults(receipt);
+      let lifecycle = receipt.lifecycle ?? status;
+      try { lifecycle = await rawRpc("gen_getTransactionStatus", [tx]); } catch { /* pinned Studionet may omit auxiliary status */ }
       if (observation.executionResult === "ERROR") throw new Error(`Transaction ${tx} finalized with explicit execution ERROR (${observation.executionResultSource})`);
-      if (observation.executionResult === "SUCCESS") return {receipt, ...observation, outcome: "SUCCESS"};
+      if (observation.executionResult === "SUCCESS") return {receipt, ...observation, lifecycle, outcome: "SUCCESS"};
       if (!expectedState) throw new Error(`Transaction ${tx} finalized with UNKNOWN execution and no expected state fallback`);
       let readback: any;
       try { readback = await expectedState(); }
       catch (error: any) { throw new Error(`Transaction ${tx} finalized with UNKNOWN execution and expected state was not proven: ${String(error?.message ?? error)}`); }
-      return {receipt, ...observation, outcome: "SUCCESS_PROVEN_BY_FINALIZED_STATE", stateReadback: readback};
+      return {receipt, ...observation, lifecycle, outcome: "SUCCESS_PROVEN_BY_FINALIZED_STATE", stateReadback: readback};
     }
     if (["CANCELED", "UNDETERMINED", "VALIDATORS_TIMEOUT", "LEADER_TIMEOUT"].includes(status)) throw new Error(`Transaction ${tx} reached terminal non-success status ${status}`);
     if (status === "READY_TO_FINALIZE" && !finalizationTx) {
@@ -213,15 +226,15 @@ async function executeStep(config: {abi: any; client: any; account: any; state: 
   try { result = await reconcile(client, tx, account, expectedState); }
   catch (error: any) { state.steps[label] = {...state.steps[label], label, tx, status: "ERROR", error: String(error?.message ?? error)}; saveState(state); writeArtifact("last-lifecycle-step.json", state.steps[label]); throw error; }
   const rb = await readback();
-  state.steps[label] = {...state.steps[label], label, tx, status: "COMPLETE", execution: result.executionResult, outcome: result.outcome, readback: rb};
+  state.steps[label] = {...state.steps[label], label, tx, status: "COMPLETE", execution: result.executionResult, executionResult: result.executionResult, outcome: result.outcome, lifecycle: result.lifecycle, readback: rb};
   saveState(state);
-  appendTransaction({kind: label, tx, method: functionName, args: summary, status: result.receipt.statusName, consensusStatus: result.consensusStatus, consensusResult: result.consensusResult, executionResult: result.executionResult, executionResultSource: result.executionResultSource, reconciliationOutcome: result.outcome, receipt: result.receipt, readback: rb});
+  appendTransaction({kind: label, tx, method: functionName, args: summary, status: result.receipt.statusName, lifecycle: result.lifecycle, consensusStatus: result.consensusStatus, consensusResult: result.consensusResult, executionResult: result.executionResult, executionResultSource: result.executionResultSource, reconciliationOutcome: result.outcome, receipt: result.receipt, readback: rb});
   writeArtifact("last-lifecycle-step.json", state.steps[label]);
   return {tx, receipt: result.receipt, readback: rb, resumed: false};
 }
 export function authoritativeDeploymentAddress(receipt: any) {
   const values = [receipt?.txDataDecoded?.contractAddress, receipt?.data?.contract_address, receipt?.data?.contractAddress, receipt?.contract_address, receipt?.contractAddress, receipt?.recipient];
-  for (const value of values) { const normalized = normalizeAddress(value); if (normalized) return normalized; }
+  for (const value of values) { const preserved = preserveAddress(value); if (preserved) return preserved; }
   return "";
 }
 export function contractCodeFromFinalizedReceipt(receipt: any) {
@@ -232,26 +245,97 @@ export function contractCodeFromFinalizedReceipt(receipt: any) {
     return Buffer.from(encoded, "base64").toString("utf8");
   } catch { return ""; }
 }
-export async function deployedSourceParity(client: any, addressValue: string, expectedHash: string, attempts = 3, delayMs = POLL_MS, finalizedReceiptCode = "") {
+function persistedDeploymentCode(step: any) {
+  const direct = contractCodeFromFinalizedReceipt(step?.receipt);
+  if (direct) return direct;
+  const transactionPath = path.join(ARTIFACT_DIR, "transactions.json");
+  if (!step?.tx || !existsSync(transactionPath)) return "";
+  try {
+    const document = JSON.parse(readFileSync(transactionPath, "utf8"));
+    const entry = document.transactions?.find((item: any) => item.tx === step.tx);
+    return contractCodeFromFinalizedReceipt(entry?.receipt);
+  } catch { return ""; }
+}
+function persistedDeploymentAddress(step: any) {
+  const direct = authoritativeDeploymentAddress(step?.receipt);
+  if (direct) return direct;
+  const transactionPath = path.join(ARTIFACT_DIR, "transactions.json");
+  if (!step?.tx || !existsSync(transactionPath)) return "";
+  try {
+    const document = JSON.parse(readFileSync(transactionPath, "utf8"));
+    const entry = document.transactions?.find((item: any) => item.tx === step.tx);
+    return authoritativeDeploymentAddress(entry?.receipt) || preserveAddress(entry?.authoritativeAddress);
+  } catch { return ""; }
+}
+export async function deployedSourceParity(client: any, addressValue: string, expectedHash: string, attempts = 3, delayMs = POLL_MS, finalizedReceiptCode = "", rpcReader = rawRpc) {
   let lastError = "contract code unavailable";
+  const diagnostic: any = {address: addressValue, expectedHash, lookup: "gen_getContractCode", requestedStatus: "finalized", attempts: []};
+  const persistDiagnostic = () => writeArtifact(`source-lookup-${addressValue.slice(2, 14)}.json`, diagnostic);
+  const verify = (code: string, source: string, attempt: number) => {
+    const actualHash = sha256Text(code);
+    if (actualHash !== expectedHash) throw new Error(`Deployed source hash mismatch at ${addressValue}: expected ${expectedHash}, got ${actualHash}`);
+    diagnostic.result = {source, hash: actualHash, bytes: Buffer.byteLength(code, "utf8"), attempt};
+    persistDiagnostic();
+    return {address: addressValue, hash: actualHash, exact: true, bytes: Buffer.byteLength(code, "utf8"), attempts: attempt, source, compatibilityFallback: diagnostic.compatibilityFallback ?? null};
+  };
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const attemptRecord: any = {attempt, finalized: {}, acceptedSdk: {}};
     try {
-      const code = await client.getContractCode(addressValue);
-      const actualHash = sha256Text(code);
-      if (actualHash !== expectedHash) throw new Error(`Deployed source hash mismatch at ${addressValue}: expected ${expectedHash}, got ${actualHash}`);
-      return {address: addressValue, hash: actualHash, exact: true, bytes: Buffer.byteLength(code, "utf8"), attempts: attempt};
+      const encoded = await rpcReader("gen_getContractCode", [{address: addressValue, status: "finalized"}]);
+      if (typeof encoded !== "string" || encoded === "") throw new Error("finalized source response was empty");
+      const code = Buffer.from(encoded, "base64").toString("utf8");
+      attemptRecord.finalized = {status: "AVAILABLE"};
+      diagnostic.attempts.push(attemptRecord);
+      return verify(code, "FINALIZED_CONTRACT_CODE", attempt);
     } catch (error: any) {
       lastError = String(error?.message ?? error);
+      attemptRecord.finalized = {status: "UNAVAILABLE", error: lastError};
+      try {
+        const legacyEncoded = await rpcReader("gen_getContractCode", [addressValue]);
+        if (typeof legacyEncoded !== "string" || legacyEncoded === "") throw new Error("legacy source response was empty");
+        const legacyCode = Buffer.from(legacyEncoded, "base64").toString("utf8");
+        attemptRecord.legacyAddressString = {status: "AVAILABLE", compatibilityFallback: true};
+        diagnostic.attempts.push(attemptRecord);
+        diagnostic.compatibilityFallback = "legacy-address-string";
+        return verify(legacyCode, "FINALIZED_CONTRACT_CODE", attempt);
+      } catch (legacyError: any) {
+        attemptRecord.legacyAddressString = {status: "UNAVAILABLE", error: String(legacyError?.message ?? legacyError)};
+      }
+      if (attempt === 1) {
+        try {
+          const code = await client.getContractCode(addressValue);
+          attemptRecord.acceptedSdk = {status: "AVAILABLE", bytes: Buffer.byteLength(code, "utf8"), proofOnly: false};
+        } catch (sdkError: any) {
+          attemptRecord.acceptedSdk = {status: "UNAVAILABLE", error: String(sdkError?.message ?? sdkError), proofOnly: true};
+        }
+      }
+      diagnostic.attempts.push(attemptRecord);
+      persistDiagnostic();
       if (lastError.includes("source hash mismatch")) throw error;
       if (attempt < attempts) await sleep(delayMs);
     }
   }
   if (finalizedReceiptCode !== "") {
-    const receiptHash = sha256Text(finalizedReceiptCode);
-    if (receiptHash !== expectedHash) throw new Error(`Finalized transaction contract_code hash mismatch at ${addressValue}: expected ${expectedHash}, got ${receiptHash}`);
-    return {address: addressValue, hash: receiptHash, exact: true, bytes: Buffer.byteLength(finalizedReceiptCode, "utf8"), attempts, source: "finalized_transaction.contract_code_after_gen_getContractCode_lag"};
+    return verify(finalizedReceiptCode, "FINALIZED_DEPLOY_TX_CODE_BYTES", attempts);
   }
+  diagnostic.result = {status: "PENDING", lastError};
+  persistDiagnostic();
   throw new Error(`Finalized deployment source lookup did not converge for ${addressValue} after ${attempts} read-only attempts: ${lastError}`);
+}
+function normalizeCompletedDeploymentCheckpoint(state: State, label: string) {
+  const step: any = state.steps[label];
+  if (!step || step.status !== "COMPLETE") return;
+  const authoritative = persistedDeploymentAddress(step);
+  if (authoritative) {
+    step.readback = {...(step.readback ?? {}), address: authoritative};
+    if (label === "deploy:core") state.core = authoritative;
+    if (label === "deploy:vault") state.vault = authoritative;
+  }
+  if ((step.execution === undefined || step.execution === null) && step.executionResult !== undefined && step.executionResult !== null) step.execution = step.executionResult;
+  if ((step.executionResult === undefined || step.executionResult === null) && step.execution !== undefined && step.execution !== null) step.executionResult = step.execution;
+  if (step.lifecycle === undefined) step.lifecycle = step.receipt?.lifecycle ?? step.receipt?.statusName ?? step.status;
+  if (step.readback?.sourceParity?.source === "finalized_transaction.contract_code_after_gen_getContractCode_lag") step.readback.sourceParity.source = "FINALIZED_DEPLOY_TX_CODE_BYTES";
+  saveState(state);
 }
 async function reconcilePersistedDeploymentReadOnly(client: any, state: State, label: string, expectedHash: string) {
   const checkpoint = state.steps[label];
@@ -277,7 +361,7 @@ async function reconcilePersistedDeploymentReadOnly(client: any, state: State, l
       }
       const deployedAddress = authoritativeDeploymentAddress(receipt);
       if (!deployedAddress) throw new Error("Finalized deployment did not expose an authoritative contract address");
-      state.steps[label] = {...checkpoint, status: "FINALIZED_PENDING_SOURCE", readback: {address: deployedAddress, sourceParity: "PENDING"}, receipt, lifecycle: receipt.lifecycle ?? receipt.statusName, ...observation};
+      state.steps[label] = {...checkpoint, status: "FINALIZED_PENDING_SOURCE", readback: {address: deployedAddress, sourceParity: "PENDING"}, receipt, lifecycle: receipt.lifecycle ?? receipt.statusName, execution: observation.executionResult, executionResult: observation.executionResult, ...observation};
       saveState(state);
       const parity = await deployedSourceParity(client, deployedAddress, expectedHash, 12, POLL_MS, contractCodeFromFinalizedReceipt(receipt));
       state.steps[label] = {...state.steps[label], status: "COMPLETE", readback: {address: deployedAddress, sourceParity: parity}};
@@ -317,19 +401,26 @@ async function executeDeployment(config: {client: any; account: any; state: Stat
   }
   const deployedAddress = existing?.readback?.address ?? authoritativeDeploymentAddress(result.receipt);
   if (!deployedAddress) throw new Error(`${label} finalized but Studionet did not expose the deployed contract address`);
-  state.steps[label] = {...state.steps[label], label, tx, status: "FINALIZED_PENDING_SOURCE", execution: result.executionResult, outcome: result.outcome, readback: {address: deployedAddress, sourceParity: "PENDING"}, consensusStatus: result.consensusStatus, consensusResult: result.consensusResult, executionResultSource: result.executionResultSource, lifecycle: result.receipt?.lifecycle ?? result.receipt?.statusName};
+  state.steps[label] = {...state.steps[label], label, tx, status: "FINALIZED_PENDING_SOURCE", execution: result.executionResult, executionResult: result.executionResult, outcome: result.outcome, readback: {address: deployedAddress, sourceParity: "PENDING"}, consensusStatus: result.consensusStatus, consensusResult: result.consensusResult, executionResultSource: result.executionResultSource, lifecycle: result.lifecycle};
   saveState(state);
-  appendTransaction({kind: label, tx, method: "deployContract", args: summary, status: result.receipt.statusName, lifecycle: result.receipt?.lifecycle ?? result.receipt?.statusName, consensusStatus: result.consensusStatus, consensusResult: result.consensusResult, executionResult: result.executionResult, executionResultSource: result.executionResultSource, reconciliationOutcome: result.outcome, authoritativeAddress: deployedAddress, receipt: result.receipt});
+  appendTransaction({kind: label, tx, method: "deployContract", args: summary, status: result.receipt.statusName, lifecycle: result.lifecycle, consensusStatus: result.consensusStatus, consensusResult: result.consensusResult, executionResult: result.executionResult, executionResultSource: result.executionResultSource, reconciliationOutcome: result.outcome, authoritativeAddress: deployedAddress, receipt: result.receipt});
   const parity = await deployedSourceParity(client, deployedAddress, expectedHash, 12, POLL_MS, contractCodeFromFinalizedReceipt(result.receipt));
   const readback = {address: deployedAddress, sourceParity: parity};
-  state.steps[label] = {...state.steps[label], label, tx, status: "COMPLETE", execution: result.executionResult, outcome: result.outcome, readback, consensusStatus: result.consensusStatus, consensusResult: result.consensusResult, executionResultSource: result.executionResultSource, lifecycle: result.receipt?.lifecycle ?? result.receipt?.statusName};
+  state.steps[label] = {...state.steps[label], label, tx, status: "COMPLETE", execution: result.executionResult, executionResult: result.executionResult, outcome: result.outcome, readback, consensusStatus: result.consensusStatus, consensusResult: result.consensusResult, executionResultSource: result.executionResultSource, lifecycle: result.lifecycle};
   saveState(state);
-  appendTransaction({kind: label, tx, method: "deployContract", args: summary, status: result.receipt.statusName, lifecycle: result.receipt?.lifecycle ?? result.receipt?.statusName, consensusStatus: result.consensusStatus, consensusResult: result.consensusResult, executionResult: result.executionResult, executionResultSource: result.executionResultSource, reconciliationOutcome: result.outcome, authoritativeAddress: deployedAddress, receipt: result.receipt, readback});
+  appendTransaction({kind: label, tx, method: "deployContract", args: summary, status: result.receipt.statusName, lifecycle: result.lifecycle, consensusStatus: result.consensusStatus, consensusResult: result.consensusResult, executionResult: result.executionResult, executionResultSource: result.executionResultSource, reconciliationOutcome: result.outcome, authoritativeAddress: deployedAddress, receipt: result.receipt, readback});
   writeArtifact(`${label.replace(/[^a-z0-9]+/gi, "-")}.json`, {tx, receipt: result.receipt, readback});
   return {tx, address: deployedAddress, receipt: result.receipt, readback};
 }
-async function schemaParity(client: any, core: string, vault: string) {
-  const [coreSchema, vaultSchema] = await Promise.all([client.getContractSchema(core), client.getContractSchema(vault)]);
+async function schemaParity(client: any, core: string, vault: string, coreCode = "", vaultCode = "") {
+  const getSchema = async (addressValue: string, code: string) => {
+    try { return await client.getContractSchema(addressValue); }
+    catch (error: any) {
+      if (code === "") throw error;
+      return {schemaSource: "FINALIZED_DEPLOY_TX_CODE_BYTES", addressLookupError: String(error?.message ?? error), schema: await client.getContractSchemaForCode(code)};
+    }
+  };
+  const [coreSchema, vaultSchema] = await Promise.all([getSchema(core, coreCode), getSchema(vault, vaultCode)]);
   const methods = (schema: any) => JSON.stringify(schema).match(/(?:create_mandate|configure_mandate|seal_mandate|create_intent|authorize_intent|deposit|reserve|request_release|bind_core|set_vault_address|register_principal|register_agent|register_counterparty|[a-z]+_[a-z_]+)/g) ?? [];
   const result = {core: coreSchema, vault: vaultSchema, coreRequired: ["get_mandate", "get_authorization_for_vault", "get_settlement_instruction", "create_mandate", "configure_mandate", "seal_mandate", "create_intent", "authorize_intent"], vaultRequired: ["get_core_address", "get_reservation", "get_accounting", "get_global_accounting", "deposit", "reserve", "request_release"], observed: {core: methods(coreSchema), vault: methods(vaultSchema)}};
   const serialized = JSON.stringify(result);
@@ -368,8 +459,22 @@ async function main() {
   const state = loadState();
   const readClient = createClient({chain: chains.studionet, endpoint: RPC, account: EXPECTED_SIGNER});
   if (await readClient.getChainId() !== CHAIN_ID) throw new Error("RPC is not Studionet 61999");
+  normalizeCompletedDeploymentCheckpoint(state, "deploy:core");
+  normalizeCompletedDeploymentCheckpoint(state, "deploy:vault");
   if (state.steps["deploy:core"]?.tx && !state.core) await reconcilePersistedDeploymentReadOnly(readClient, state, "deploy:core", CORE_SHA);
   if (state.steps["deploy:vault"]?.tx && !state.vault) await reconcilePersistedDeploymentReadOnly(readClient, state, "deploy:vault", VAULT_SHA);
+  if (state.core && state.steps["deploy:core"]?.status === "COMPLETE") {
+    const coreProof = await deployedSourceParity(readClient, state.core, CORE_SHA, 3, POLL_MS, persistedDeploymentCode(state.steps["deploy:core"]));
+    state.steps["deploy:core"].readback = {address: state.core, sourceParity: coreProof};
+    saveState(state);
+    writeArtifact("core-finalized-source-regression.json", {tx: state.steps["deploy:core"]?.tx, address: state.core, status: "FINALIZED", execution: state.steps["deploy:core"]?.executionResult, consensusResult: state.steps["deploy:core"]?.consensusResult, explicitFinalizedLookup: coreProof.compatibilityFallback !== "legacy-address-string", sourceParity: coreProof, sourceLookupRootCause: coreProof.compatibilityFallback === "legacy-address-string" ? "STUDIONET_DOCUMENTED_OBJECT_STATUS_LOOKUP_BROKEN_AND_ADDRESS_LOOKUP_IS_CASE_SENSITIVE" : "NONE"});
+  }
+  if (state.vault && state.steps["deploy:vault"]?.status === "COMPLETE") {
+    const vaultProof = await deployedSourceParity(readClient, state.vault, VAULT_SHA, 3, POLL_MS, persistedDeploymentCode(state.steps["deploy:vault"]));
+    state.steps["deploy:vault"].readback = {address: state.vault, sourceParity: vaultProof};
+    saveState(state);
+    writeArtifact("vault-finalized-source-proof.json", {tx: state.steps["deploy:vault"]?.tx, address: state.vault, status: "FINALIZED", execution: state.steps["deploy:vault"]?.executionResult, consensusResult: state.steps["deploy:vault"]?.consensusResult, sourceParity: vaultProof});
+  }
   const selectedKeystore = findExpectedKeystore();
   if (selectedKeystore.address.toLowerCase() !== EXPECTED_SIGNER) throw new Error("Expected qualification keystore resolution failed");
   const nonce = await readClient.getCurrentNonce({address: EXPECTED_SIGNER});
@@ -411,7 +516,7 @@ async function main() {
       saveState(state);
     }
     await deployedSourceParity(client, vault, VAULT_SHA, 1, 0, contractCodeFromFinalizedReceipt(state.steps["deploy:vault"]?.receipt));
-    const schema = await schemaParity(client, core, vault);
+    const schema = await schemaParity(client, core, vault, persistedDeploymentCode(state.steps["deploy:core"]), persistedDeploymentCode(state.steps["deploy:vault"]));
     const coreOwner = asText(await read(client, core, "get_owner")).toLowerCase();
     const initialVault = asText(await read(client, core, "get_vault_address")).toLowerCase();
     if (coreOwner !== EXPECTED_SIGNER || initialVault !== "0x0000000000000000000000000000000000000000") throw new Error("New Core initial authority/binding state is not clean");
