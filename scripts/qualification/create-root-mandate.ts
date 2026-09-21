@@ -22,7 +22,7 @@ function stableCliNodeModules() {
   return path.join(pnpmRoot, entry, "node_modules");
 }
 
-async function loadPinnedDependencies() {
+export async function loadPinnedDependencies() {
   const cliModules = stableCliNodeModules();
   const sdk = await import(pathToFileURL(path.join(cliModules, "genlayer-js", "dist", "index.js")).href);
   const types = await import(pathToFileURL(path.join(cliModules, "genlayer-js", "dist", "types", "index.js")).href);
@@ -95,21 +95,47 @@ function describeCalldata(abi: any, args: readonly unknown[]) {
   };
 }
 
-function activeAccountName() {
-  const configPath = path.join(os.homedir(), ".genlayer", "genlayer-config.json");
-  if (!existsSync(configPath)) return "default";
-  const config = JSON.parse(readFileSync(configPath, "utf8"));
-  return typeof config.activeAccount === "string" && config.activeAccount.length > 0 ? config.activeAccount : "default";
+function normalizeMetadataAddress(value: unknown) {
+  const text = String(value ?? "").trim().toLowerCase();
+  if (!/^(0x)?[0-9a-f]{40}$/.test(text)) return "";
+  return text.startsWith("0x") ? text : `0x${text}`;
 }
 
-async function loadExistingAccount(Wallet: any, prompt: any) {
-  const name = activeAccountName();
-  const keystorePath = path.join(os.homedir(), ".genlayer", "keystores", `${name}.json`);
-  if (!existsSync(keystorePath)) throw new Error(`Existing encrypted keystore '${name}' was not found`);
+export function selectExpectedKeystore(entries: Array<{name: string; address: string; path: string}>, expected = EXPECTED_SIGNER) {
+  const expectedAddress = normalizeMetadataAddress(expected);
+  const matches = entries
+    .filter((entry) => normalizeMetadataAddress(entry.address) === expectedAddress)
+    .sort((left, right) => left.name.localeCompare(right.name));
+  if (matches.length === 0) throw new Error("No encrypted keystore matches the qualification signer");
+  return matches[0];
+}
+
+function listKeystoreMetadata() {
+  const keystoreDir = path.join(os.homedir(), ".genlayer", "keystores");
+  if (!existsSync(keystoreDir)) throw new Error("GenLayer encrypted keystore directory was not found");
+  const entries: Array<{name: string; address: string; path: string}> = [];
+  for (const file of readdirSync(keystoreDir).filter((candidate) => candidate.endsWith(".json")).sort()) {
+    const keystorePath = path.join(keystoreDir, file);
+    try {
+      const metadata = JSON.parse(readFileSync(keystorePath, "utf8"));
+      const address = normalizeMetadataAddress(metadata.address);
+      if (address !== "") entries.push({name: file.slice(0, -5), address, path: keystorePath});
+    } catch {
+      // Ignore malformed profiles; selection remains fail-closed if no expected address exists.
+    }
+  }
+  return entries;
+}
+
+export function findExpectedKeystore() {
+  return selectExpectedKeystore(listKeystoreMetadata());
+}
+
+export async function loadExistingAccount(Wallet: any, prompt: any) {
+  const selected = findExpectedKeystore();
+  const name = selected.name;
+  const keystorePath = selected.path;
   const keystoreJson = readFileSync(keystorePath, "utf8");
-  const metadata = JSON.parse(keystoreJson);
-  const metadataAddress = `0x${String(metadata.address ?? "").replace(/^0x/i, "")}`.toLowerCase();
-  if (metadataAddress !== EXPECTED_SIGNER.toLowerCase()) throw new Error("Active keystore address does not match the qualification signer");
   const answer = await prompt([{type: "password", name: "password", message: "Enter password to decrypt the existing GenLayer keystore:", mask: "*"}]);
   let password = answer.password as string;
   try {

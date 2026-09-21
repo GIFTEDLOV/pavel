@@ -51,3 +51,12 @@ encrypted keystore via secure interactive decryption, constructs
 requires explicit confirmation, submits once, and persists the hash without
 automatic retry. No contract source changed and no third create-Mandate write
 was broadcast during this audit.
+
+The subsequent autonomous-runner preparation found that the CLI active profile
+was `agentpact-requester` on `studio-dev`, while the expected qualification
+address is stored in the encrypted `meritround-v2-studionet` profile. This is
+an account-metadata selection issue, not a contract or network defect. The
+runner now resolves the expected profile by address, records metadata-only
+preflight evidence, and leaves encrypted-keystore decryption behind one
+explicit confirmation and the secure local password prompt. At this checkpoint
+no new transaction has been submitted.

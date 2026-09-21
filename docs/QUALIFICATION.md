@@ -128,3 +128,24 @@ zero committed byte length, and an empty recovery authority defaults to the
 sealed source authority. Required textual fields and recovery URLs remain
 non-empty. The audit is recorded in
 `artifacts/studionet/qualification-v2/empty-string-boundary-audit.json`.
+
+## qualification-v2 address-bound keystore resolution and runner
+
+The local GenLayer configuration currently marks `agentpact-requester` on
+`studio-dev` as active. That profile is not the qualification signer. The
+encrypted profile `meritround-v2-studionet` has metadata address
+`0xcb5a845638cbc1f95d7f8343278685682c3ba13f`, so the qualification tooling now
+selects encrypted keystores by normalized metadata address rather than by the
+active profile. It never reads or prints credential material during metadata
+selection.
+
+`scripts/qualification/run-v2.ts` performs one read-only preflight and then,
+after one explicit plan confirmation, loads the selected encrypted keystore in
+memory and executes the remaining qualification lifecycle sequentially. Every
+write uses the pinned `genlayer-js` typed-argument path, persists its hash
+before polling, reconciles the same hash to `FINALIZED`, checks execution
+success independently, and performs an authoritative readback. Its current
+preflight artifact records zero Mandates, zero Intents, zero Counterparty
+`C-1`, and conserved zero Vault accounting. No lifecycle write has been
+submitted by the runner yet; secure password entry remains the only human
+checkpoint.
