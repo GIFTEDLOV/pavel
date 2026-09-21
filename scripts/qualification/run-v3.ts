@@ -21,6 +21,8 @@ const POLL_MS = 5000;
 const MAX_POLLS = 720;
 const CORE_SOURCE = path.join(ROOT, "contracts", "pavel_core.py");
 const VAULT_SOURCE = path.join(ROOT, "contracts", "pavel_vault.py");
+const RPC_MIN_SPACING_MS = 2500;
+const RPC_MAX_READ_ATTEMPTS = 4;
 
 type Fixture = Record<string, any>;
 type Step = {label: string; tx: string; status: string; execution?: string; outcome?: string; readback?: any; error?: string};
@@ -42,6 +44,70 @@ function writeArtifact(name: string, value: any) {
   mkdirSync(ARTIFACT_DIR, {recursive: true});
   writeFileSync(path.join(ARTIFACT_DIR, name), JSON.stringify(jsonSafe(value), null, 2) + "\n");
 }
+
+function rateLimitError(error: any) {
+  const message = String(error?.message ?? error ?? "").toLowerCase();
+  return message.includes("429") || message.includes("rate limit") || message.includes("too many requests");
+}
+
+export class QualificationRpcScheduler {
+  private tail: Promise<void> = Promise.resolve();
+  private nextAllowedAt = 0;
+  private readonly minSpacingMs: number;
+  private readonly maxReadAttempts: number;
+  private readonly backoffBaseMs: number;
+  private attempts = 0;
+  private rateLimitEvents = 0;
+  private readRetries = 0;
+  private writeRetriesPrevented = 0;
+
+  constructor(options: {minSpacingMs?: number; maxReadAttempts?: number; backoffBaseMs?: number} = {}) {
+    this.minSpacingMs = options.minSpacingMs ?? RPC_MIN_SPACING_MS;
+    this.maxReadAttempts = options.maxReadAttempts ?? RPC_MAX_READ_ATTEMPTS;
+    this.backoffBaseMs = options.backoffBaseMs ?? 5000;
+  }
+
+  enqueue<T>(label: string, operation: () => Promise<T>, readOnly: boolean) {
+    let resolveResult!: (value: T | PromiseLike<T>) => void;
+    let rejectResult!: (reason?: any) => void;
+    const result = new Promise<T>((resolve, reject) => { resolveResult = resolve; rejectResult = reject; });
+    const run = async () => {
+      try { resolveResult(await this.execute(label, operation, readOnly)); }
+      catch (error) { rejectResult(error); }
+    };
+    this.tail = this.tail.then(run, run);
+    return result;
+  }
+
+  private async execute<T>(label: string, operation: () => Promise<T>, readOnly: boolean) {
+    const limit = readOnly ? this.maxReadAttempts : 1;
+    for (let attempt = 1; attempt <= limit; attempt += 1) {
+      const waitMs = Math.max(0, this.nextAllowedAt - Date.now());
+      if (waitMs > 0) await sleep(waitMs);
+      this.nextAllowedAt = Date.now() + this.minSpacingMs;
+      this.attempts += 1;
+      try { return await operation(); }
+      catch (error: any) {
+        if (!rateLimitError(error)) throw error;
+        this.rateLimitEvents += 1;
+        if (!readOnly || attempt >= limit) {
+          if (!readOnly) this.writeRetriesPrevented += 1;
+          throw error;
+        }
+        this.readRetries += 1;
+        const retryAfter = Number(error?.retryAfterMs ?? 0);
+        const backoff = Math.max(retryAfter, this.backoffBaseMs * (2 ** (attempt - 1))) + Math.floor(Math.random() * 250);
+        this.nextAllowedAt = Math.max(this.nextAllowedAt, Date.now() + backoff);
+        writeArtifact("rpc-rate-limit-diagnostics.json", {lastRateLimit: {label, attempt, backoffMs: backoff, readOnly: true}, ...this.snapshot()});
+      }
+    }
+    throw new Error(`RPC scheduler exhausted read-only retries for ${label}`);
+  }
+
+  snapshot() { return {minSpacingMs: this.minSpacingMs, maxReadAttempts: this.maxReadAttempts, attempts: this.attempts, rateLimitEvents: this.rateLimitEvents, readRetries: this.readRetries, writeRetriesPrevented: this.writeRetriesPrevented}; }
+}
+
+const RPC_SCHEDULER = new QualificationRpcScheduler();
 
 function readFixture(): Fixture { return JSON.parse(readFileSync(FIXTURE_PATH, "utf8")); }
 function nowSeconds() { return Math.floor(Date.now() / 1000); }
@@ -85,13 +151,22 @@ function appendTransaction(entry: Record<string, any>) {
 }
 function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 async function rawRpc(method: string, params: any[]) {
-  const response = await fetch(RPC, {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({jsonrpc: "2.0", id: Date.now(), method, params})});
-  const payload: any = await response.json();
-  if (payload.error) throw new Error(`${payload.error.message ?? "RPC error"}${payload.error.data ? `: ${JSON.stringify(payload.error.data)}` : ""}`);
-  return payload.result;
+  return RPC_SCHEDULER.enqueue(`raw:${method}`, async () => {
+    const response = await fetch(RPC, {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({jsonrpc: "2.0", id: Date.now(), method, params})});
+    const payload: any = await response.json();
+    if (response.status === 429 || payload.error?.code === 429 || String(payload.error?.message ?? "").toLowerCase().includes("rate limit")) {
+      const retryAfterHeader = response.headers.get("retry-after");
+      const retryAfterMs = retryAfterHeader ? (/^\d+(\.\d+)?$/.test(retryAfterHeader) ? Number(retryAfterHeader) * 1000 : Math.max(0, Date.parse(retryAfterHeader) - Date.now())) : 0;
+      const error: any = new Error(`${payload.error?.message ?? "RPC rate limit"}`);
+      error.retryAfterMs = retryAfterMs;
+      throw error;
+    }
+    if (payload.error) throw new Error(`${payload.error.message ?? "RPC error"}${payload.error.data ? `: ${JSON.stringify(payload.error.data)}` : ""}`);
+    return payload.result;
+  }, true);
 }
 function read(client: any, target: string, functionName: string, args: any[] = []) {
-  return client.readContract({address: target, functionName, args, account: EXPECTED_SIGNER});
+  return RPC_SCHEDULER.enqueue(`read:${functionName}`, () => client.readContract({address: target, functionName, args, account: EXPECTED_SIGNER}), true);
 }
 function calldataProof(abi: any, functionName: string, args: any[]) {
   const object = abi.calldata.makeCalldataObject(functionName, args, undefined);
@@ -99,8 +174,9 @@ function calldataProof(abi: any, functionName: string, args: any[]) {
   const decoded = abi.calldata.decode(encoded);
   const map = decoded instanceof Map ? decoded : new Map(Object.entries(decoded));
   const decodedArgs = map.get("args");
-  if (!Array.isArray(decodedArgs) || decodedArgs.length !== args.length) throw new Error(`${functionName} typed calldata argument count mismatch`);
-  return {method: functionName, argumentCount: decodedArgs.length, roundTrip: abi.calldata.toString(decoded), encodedBytes: Array.from(encoded)};
+  const normalizedArgs = decodedArgs === undefined && args.length === 0 ? [] : decodedArgs;
+  if (!Array.isArray(normalizedArgs) || normalizedArgs.length !== args.length) throw new Error(`${functionName} typed calldata argument count mismatch`);
+  return {method: functionName, argumentCount: normalizedArgs.length, roundTrip: abi.calldata.toString(decoded), encodedBytes: Array.from(encoded)};
 }
 function fixtureWithDefaults(fixture: Fixture) {
   const authority = String(fixture.authority ?? "").trim().toLowerCase();
@@ -177,7 +253,7 @@ async function reconcile(client: any, tx: string, account: any, expectedState?: 
   let finalizationTx: string | undefined;
   for (let attempt = 1; attempt <= MAX_POLLS; attempt += 1) {
     let receipt: any;
-    try { receipt = await client.getTransaction({hash: tx}); }
+    try { receipt = await RPC_SCHEDULER.enqueue(`tx:${tx}:status`, () => client.getTransaction({hash: tx}), true); }
     catch (error: any) { writeArtifact(`tx-${tx.slice(2, 14)}.json`, {tx, attempt, polling: "AMBIGUOUS", error: String(error?.message ?? error)}); await sleep(POLL_MS); continue; }
     writeArtifact(`tx-${tx.slice(2, 14)}.json`, {tx, attempt, receipt});
     if (!receipt) { await sleep(POLL_MS); continue; }
@@ -196,7 +272,7 @@ async function reconcile(client: any, tx: string, account: any, expectedState?: 
     }
     if (["CANCELED", "UNDETERMINED", "VALIDATORS_TIMEOUT", "LEADER_TIMEOUT"].includes(status)) throw new Error(`Transaction ${tx} reached terminal non-success status ${status}`);
     if (status === "READY_TO_FINALIZE" && !finalizationTx) {
-      finalizationTx = await client.finalizeTransaction({account, txId: tx});
+      finalizationTx = await RPC_SCHEDULER.enqueue(`tx:${tx}:finalize`, () => client.finalizeTransaction({account, txId: tx}), false);
       appendTransaction({kind: `finalize:${tx}`, tx: finalizationTx, status: "SUBMITTED", execution: "PENDING"});
     }
     await sleep(POLL_MS);
@@ -215,7 +291,7 @@ async function executeStep(config: {abi: any; client: any; account: any; state: 
   } else {
     proof = calldataProof(abi, functionName, args);
     await precondition();
-    tx = String(await client.writeContract({address: targetFor(label, core, vault), functionName, args, value, account}));
+    tx = String(await RPC_SCHEDULER.enqueue(`write:${label}`, () => client.writeContract({address: targetFor(label, core, vault), functionName, args, value, account}), false));
     const entry: Step = {label, tx, status: "SUBMITTED"};
     state.steps[label] = entry;
     saveState(state);
@@ -267,6 +343,12 @@ function persistedDeploymentAddress(step: any) {
     return authoritativeDeploymentAddress(entry?.receipt) || preserveAddress(entry?.authoritativeAddress);
   } catch { return ""; }
 }
+function cachedSourceParity(step: any, addressValue: string, expectedHash: string) {
+  const proof = step?.readback?.sourceParity;
+  if (!proof || proof.exact !== true || proof.hash !== expectedHash) return null;
+  if (normalizeAddress(proof.address) !== normalizeAddress(addressValue)) return null;
+  return proof;
+}
 export async function deployedSourceParity(client: any, addressValue: string, expectedHash: string, attempts = 3, delayMs = POLL_MS, finalizedReceiptCode = "", rpcReader = rawRpc) {
   let lastError = "contract code unavailable";
   const diagnostic: any = {address: addressValue, expectedHash, lookup: "gen_getContractCode", requestedStatus: "finalized", attempts: []};
@@ -303,7 +385,7 @@ export async function deployedSourceParity(client: any, addressValue: string, ex
       }
       if (attempt === 1) {
         try {
-          const code = await client.getContractCode(addressValue);
+          const code = await RPC_SCHEDULER.enqueue(`source:${addressValue}`, () => client.getContractCode(addressValue), true);
           attemptRecord.acceptedSdk = {status: "AVAILABLE", bytes: Buffer.byteLength(code, "utf8"), proofOnly: false};
         } catch (sdkError: any) {
           attemptRecord.acceptedSdk = {status: "UNAVAILABLE", error: String(sdkError?.message ?? sdkError), proofOnly: true};
@@ -342,7 +424,7 @@ async function reconcilePersistedDeploymentReadOnly(client: any, state: State, l
   if (!checkpoint?.tx || checkpoint.status === "COMPLETE") return checkpoint?.readback?.address ?? "";
   let receipt: any;
   for (let attempt = 1; attempt <= 24; attempt += 1) {
-    try { receipt = await client.getTransaction({hash: checkpoint.tx}); }
+      try { receipt = await RPC_SCHEDULER.enqueue(`tx:${checkpoint.tx}:status`, () => client.getTransaction({hash: checkpoint.tx}), true); }
     catch (error: any) { writeArtifact(`tx-${checkpoint.tx.slice(2, 14)}.json`, {tx: checkpoint.tx, attempt, polling: "AMBIGUOUS", error: String(error?.message ?? error)}); await sleep(POLL_MS); continue; }
     writeArtifact(`tx-${checkpoint.tx.slice(2, 14)}.json`, {tx: checkpoint.tx, attempt, receipt});
     if (!receipt) { await sleep(POLL_MS); continue; }
@@ -385,7 +467,7 @@ async function executeDeployment(config: {client: any; account: any; state: Stat
   if (!tx) {
     const code = new Uint8Array(readFileSync(codePath));
     if (sha256File(codePath) !== expectedHash) throw new Error(`${label} source hash changed after freeze`);
-    tx = String(await client.deployContract({code, args: constructorArgs, account}));
+    tx = String(await RPC_SCHEDULER.enqueue(`write:${label}`, () => client.deployContract({code, args: constructorArgs, account}), false));
     state.steps[label] = {label, tx, status: "SUBMITTED"};
     saveState(state);
     appendTransaction({kind: label, tx, method: "deployContract", args: summary, status: "SUBMITTED", execution: "PENDING", broadcastedAt: new Date().toISOString()});
@@ -413,11 +495,25 @@ async function executeDeployment(config: {client: any; account: any; state: Stat
   return {tx, address: deployedAddress, receipt: result.receipt, readback};
 }
 async function schemaParity(client: any, core: string, vault: string, coreCode = "", vaultCode = "") {
+  const cachePath = path.join(ARTIFACT_DIR, "qualification-schema-cache.json");
+  if (existsSync(cachePath)) {
+    try {
+      const cached = JSON.parse(readFileSync(cachePath, "utf8"));
+      if (cached.coreAddress?.toLowerCase() === core.toLowerCase() && cached.vaultAddress?.toLowerCase() === vault.toLowerCase() && cached.sourceHashes?.core === CORE_SHA && cached.sourceHashes?.vault === VAULT_SHA) {
+        const serialized = JSON.stringify(cached.schemas);
+        for (const name of [...cached.coreRequired, ...cached.vaultRequired]) if (!serialized.includes(name)) throw new Error(`Cached schema is missing required interface method ${name}`);
+        writeArtifact("live-interface-parity.json", cached.schemas);
+        return cached.summary;
+      }
+    } catch (error: any) {
+      writeArtifact("qualification-schema-cache-invalid.json", {error: String(error?.message ?? error)});
+    }
+  }
   const getSchema = async (addressValue: string, code: string) => {
-    try { return await client.getContractSchema(addressValue); }
+    try { return await RPC_SCHEDULER.enqueue(`schema:${addressValue}`, () => client.getContractSchema(addressValue), true); }
     catch (error: any) {
       if (code === "") throw error;
-      return {schemaSource: "FINALIZED_DEPLOY_TX_CODE_BYTES", addressLookupError: String(error?.message ?? error), schema: await client.getContractSchemaForCode(code)};
+      return {schemaSource: "FINALIZED_DEPLOY_TX_CODE_BYTES", addressLookupError: String(error?.message ?? error), schema: await RPC_SCHEDULER.enqueue(`schema-source:${addressValue}`, () => client.getContractSchemaForCode(code), true)};
     }
   };
   const [coreSchema, vaultSchema] = await Promise.all([getSchema(core, coreCode), getSchema(vault, vaultCode)]);
@@ -426,7 +522,30 @@ async function schemaParity(client: any, core: string, vault: string, coreCode =
   const serialized = JSON.stringify(result);
   for (const name of [...result.coreRequired, ...result.vaultRequired]) if (!serialized.includes(name)) throw new Error(`Deployed schema is missing required interface method ${name}`);
   writeArtifact("live-interface-parity.json", result);
-  return {status: "PASS", coreMethods: result.coreRequired, vaultMethods: result.vaultRequired};
+  const summary = {status: "PASS", source: "LIVE_SCHEMA_OR_FROZEN_DEPLOYMENT_SOURCE", coreMethods: result.coreRequired, vaultMethods: result.vaultRequired};
+  writeArtifact("qualification-schema-cache.json", {network: "studionet", chainId: CHAIN_ID, coreAddress: core, vaultAddress: vault, sourceHashes: {core: CORE_SHA, vault: VAULT_SHA}, coreRequired: result.coreRequired, vaultRequired: result.vaultRequired, schemas: result, summary});
+  return summary;
+}
+async function prepareBindingPreflight(abi: any, client: any, state: State, core: string, vault: string, CalldataAddress: new (bytes: Uint8Array) => unknown) {
+  const coreOwner = asText(await read(client, core, "get_owner")).toLowerCase();
+  const coreVault = asText(await read(client, core, "get_vault_address")).toLowerCase();
+  const vaultCore = asText(await read(client, vault, "get_core_address")).toLowerCase();
+  const accounting = assertAccounting(await read(client, vault, "get_global_accounting"), "Initial global");
+  if (coreOwner !== EXPECTED_SIGNER || vaultCore !== core.toLowerCase()) throw new Error("V3 binding preflight authority or constructor state mismatch");
+  const zero = "0x0000000000000000000000000000000000000000";
+  let nextWrite = "binding-complete";
+  if (coreVault === zero) nextWrite = "vault:bind_core";
+  else if (coreVault !== vault.toLowerCase()) throw new Error("V3 Core has an unexpected nonzero Vault address");
+  else nextWrite = "core:set_vault_address";
+  const proof = {
+    "vault:bind_core": calldataProof(abi, "bind_core", []),
+    "core:set_vault_address": calldataProof(abi, "set_vault_address", [address(CalldataAddress, vault)]),
+  };
+  const preflight = {status: "PASS", nextWrite, core, vault, coreOwner, coreVault, vaultCore, initialAccounting: accounting, typedCalldata: proof};
+  writeArtifact("binding-preflight.json", preflight);
+  state.observations.bindingPreflight = preflight;
+  saveState(state);
+  return preflight;
 }
 async function evidenceReadback(client: any, core: string, intentId: string, sequence: bigint) {
   const intent = asRecord(await read(client, core, "get_intent", [intentId]));
@@ -437,7 +556,7 @@ async function evidenceReadback(client: any, core: string, intentId: string, seq
 }
 async function simulateUnassessed(client: any, vault: string, account: any, intentId: string) {
   try {
-    const value = await client.simulateWriteContract({address: vault, functionName: "reserve", args: [intentId], account});
+    const value = await RPC_SCHEDULER.enqueue("simulate:unassessed-reserve", () => client.simulateWriteContract({address: vault, functionName: "reserve", args: [intentId], account}), true);
     if (value !== undefined) throw new Error("unassessed reservation simulation unexpectedly succeeded");
   } catch (error: any) {
     const message = String(error?.message ?? error);
@@ -458,27 +577,46 @@ async function main() {
   if (nowSeconds() >= Number(fixture.expiresAt)) throw new Error("Qualification-v3 fixture has expired");
   const state = loadState();
   const readClient = createClient({chain: chains.studionet, endpoint: RPC, account: EXPECTED_SIGNER});
-  if (await readClient.getChainId() !== CHAIN_ID) throw new Error("RPC is not Studionet 61999");
+  if (await RPC_SCHEDULER.enqueue("chain-id", () => readClient.getChainId(), true) !== CHAIN_ID) throw new Error("RPC is not Studionet 61999");
   normalizeCompletedDeploymentCheckpoint(state, "deploy:core");
   normalizeCompletedDeploymentCheckpoint(state, "deploy:vault");
+  const transactionPath = path.join(ARTIFACT_DIR, "transactions.json");
+  const transactionDocument = existsSync(transactionPath) ? JSON.parse(readFileSync(transactionPath, "utf8")) : {transactions: []};
+  const checkpointTxs = new Set(Object.values(state.steps).map((step: any) => step?.tx).filter(Boolean));
+  const unexpectedTransactions = (transactionDocument.transactions ?? []).filter((entry: any) => entry?.tx && !checkpointTxs.has(entry.tx) && !String(entry.kind ?? "").startsWith("finalize:"));
+  if (unexpectedTransactions.length) {
+    const reconciled = [];
+    for (const entry of unexpectedTransactions) {
+      const receipt = await RPC_SCHEDULER.enqueue(`unexpected-tx:${entry.tx}`, () => readClient.getTransaction({hash: entry.tx}), true);
+      reconciled.push({tx: entry.tx, kind: entry.kind ?? "UNKNOWN", status: receipt?.statusName ?? receipt?.status ?? "UNKNOWN"});
+    }
+    writeArtifact("unexpected-transaction-reconciliation.json", {transactions: reconciled});
+    throw new Error("Unexpected persisted transaction detected; same-hash reconciliation is required before continuing");
+  }
+  writeArtifact("last-run-write-reconciliation.json", {newStateChangingTxFromLastRun: "NO", persistedTransactions: transactionDocument.transactions?.length ?? 0, checkpointTransactions: checkpointTxs.size});
   if (state.steps["deploy:core"]?.tx && !state.core) await reconcilePersistedDeploymentReadOnly(readClient, state, "deploy:core", CORE_SHA);
   if (state.steps["deploy:vault"]?.tx && !state.vault) await reconcilePersistedDeploymentReadOnly(readClient, state, "deploy:vault", VAULT_SHA);
   if (state.core && state.steps["deploy:core"]?.status === "COMPLETE") {
-    const coreProof = await deployedSourceParity(readClient, state.core, CORE_SHA, 3, POLL_MS, persistedDeploymentCode(state.steps["deploy:core"]));
+    const coreProof = cachedSourceParity(state.steps["deploy:core"], state.core, CORE_SHA) ?? await deployedSourceParity(readClient, state.core, CORE_SHA, 3, POLL_MS, persistedDeploymentCode(state.steps["deploy:core"]));
     state.steps["deploy:core"].readback = {address: state.core, sourceParity: coreProof};
     saveState(state);
     writeArtifact("core-finalized-source-regression.json", {tx: state.steps["deploy:core"]?.tx, address: state.core, status: "FINALIZED", execution: state.steps["deploy:core"]?.executionResult, consensusResult: state.steps["deploy:core"]?.consensusResult, explicitFinalizedLookup: coreProof.compatibilityFallback !== "legacy-address-string", sourceParity: coreProof, sourceLookupRootCause: coreProof.compatibilityFallback === "legacy-address-string" ? "STUDIONET_DOCUMENTED_OBJECT_STATUS_LOOKUP_BROKEN_AND_ADDRESS_LOOKUP_IS_CASE_SENSITIVE" : "NONE"});
   }
   if (state.vault && state.steps["deploy:vault"]?.status === "COMPLETE") {
-    const vaultProof = await deployedSourceParity(readClient, state.vault, VAULT_SHA, 3, POLL_MS, persistedDeploymentCode(state.steps["deploy:vault"]));
+    const vaultProof = cachedSourceParity(state.steps["deploy:vault"], state.vault, VAULT_SHA) ?? await deployedSourceParity(readClient, state.vault, VAULT_SHA, 3, POLL_MS, persistedDeploymentCode(state.steps["deploy:vault"]));
     state.steps["deploy:vault"].readback = {address: state.vault, sourceParity: vaultProof};
     saveState(state);
     writeArtifact("vault-finalized-source-proof.json", {tx: state.steps["deploy:vault"]?.tx, address: state.vault, status: "FINALIZED", execution: state.steps["deploy:vault"]?.executionResult, consensusResult: state.steps["deploy:vault"]?.consensusResult, sourceParity: vaultProof});
   }
+  if (!state.core || !state.vault) throw new Error("V3 deployment checkpoint is incomplete after read-only reconciliation");
+  const schema = await schemaParity(readClient, state.core, state.vault, persistedDeploymentCode(state.steps["deploy:core"]), persistedDeploymentCode(state.steps["deploy:vault"]));
+  state.observations.schema = schema;
+  let bindingPreflight: any = state.observations.bindingPreflight;
+  if (!state.observations.binding?.status) bindingPreflight = await prepareBindingPreflight(abi, readClient, state, state.core, state.vault, CalldataAddress);
   const selectedKeystore = findExpectedKeystore();
   if (selectedKeystore.address.toLowerCase() !== EXPECTED_SIGNER) throw new Error("Expected qualification keystore resolution failed");
-  const nonce = await readClient.getCurrentNonce({address: EXPECTED_SIGNER});
-  const plan = {qualificationVersion: "qualification-v3", network: "studionet", rpc: RPC, chainId: CHAIN_ID, signer: EXPECTED_SIGNER, selectedKeystore: {name: selectedKeystore.name, address: selectedKeystore.address}, sourceHashes: {core: CORE_SHA, vault: VAULT_SHA}, fixture: {validFrom: fixture.validFrom, expiresAt: fixture.expiresAt, amount: "1", authority: fixture.authority}, checkpoint: {core: state.core ?? null, vault: state.vault ?? null, steps: Object.keys(state.steps)}, deployerNonce: String(nonce), explicitAuthorization: "user-authorized-qualification-v3"};
+  const nonce = await RPC_SCHEDULER.enqueue("deployer-nonce", () => readClient.getCurrentNonce({address: EXPECTED_SIGNER}), true);
+  const plan = {qualificationVersion: "qualification-v3", network: "studionet", rpc: RPC, chainId: CHAIN_ID, signer: EXPECTED_SIGNER, selectedKeystore: {name: selectedKeystore.name, address: selectedKeystore.address}, sourceHashes: {core: CORE_SHA, vault: VAULT_SHA}, fixture: {validFrom: fixture.validFrom, expiresAt: fixture.expiresAt, amount: "1", authority: fixture.authority}, checkpoint: {core: state.core ?? null, vault: state.vault ?? null, steps: Object.keys(state.steps)}, deployerNonce: String(nonce), nextUnfinishedWrite: bindingPreflight?.nextWrite ?? "unknown", rpcScheduler: RPC_SCHEDULER.snapshot(), explicitAuthorization: "user-authorized-qualification-v3"};
   writeArtifact("qualification-v3-run-plan.json", plan);
   console.log(JSON.stringify({QUALIFICATION_V3_PLAN: plan}, null, 2));
   if (process.argv.includes("--preflight-only")) { writeArtifact("qualification-v3-run-status.json", {status: "PREFLIGHT_ONLY", plan, noTransactionSubmitted: true}); return; }
@@ -508,22 +646,18 @@ async function main() {
       state.core = core;
       saveState(state);
     }
-    await deployedSourceParity(client, core, CORE_SHA, 1, 0, contractCodeFromFinalizedReceipt(state.steps["deploy:core"]?.receipt));
+    if (!cachedSourceParity(state.steps["deploy:core"], core, CORE_SHA)) await deployedSourceParity(client, core, CORE_SHA, 3, POLL_MS, persistedDeploymentCode(state.steps["deploy:core"]));
     if (!vault) {
       const deployed = await executeDeployment({client, account, state, label: "deploy:vault", codePath: VAULT_SOURCE, expectedHash: VAULT_SHA, constructorArgs: [address(CalldataAddress, core)], summary: [{type: "Address", value: core}]});
       vault = deployed.address;
       state.vault = vault;
       saveState(state);
     }
-    await deployedSourceParity(client, vault, VAULT_SHA, 1, 0, contractCodeFromFinalizedReceipt(state.steps["deploy:vault"]?.receipt));
-    const schema = await schemaParity(client, core, vault, persistedDeploymentCode(state.steps["deploy:core"]), persistedDeploymentCode(state.steps["deploy:vault"]));
-    const coreOwner = asText(await read(client, core, "get_owner")).toLowerCase();
-    const initialVault = asText(await read(client, core, "get_vault_address")).toLowerCase();
-    if (coreOwner !== EXPECTED_SIGNER || initialVault !== "0x0000000000000000000000000000000000000000") throw new Error("New Core initial authority/binding state is not clean");
-    if (asText(await read(client, vault, "get_core_address")).toLowerCase() !== core) throw new Error("New Vault constructor Core address mismatch");
-    assertAccounting(await read(client, vault, "get_global_accounting"), "Initial global");
-    await executeStep({abi, client, account, state, core, vault, label: "vault:bind_core", functionName: "bind_core", args: [], summary: [], precondition: async () => { if (asText(await read(client, vault, "get_core_address")).toLowerCase() !== core) throw new Error("Vault Core constructor binding changed"); }, readback: async () => read(client, vault, "get_core_address"), expectedState: async () => { if (asText(await read(client, vault, "get_core_address")).toLowerCase() !== core) throw new Error("Vault Core binding was not finalized"); return {core}; }});
-    await executeStep({abi, client, account, state, core, vault, label: "core:set_vault_address", functionName: "set_vault_address", args: [address(CalldataAddress, vault)], summary: [{type: "Address", value: vault}], precondition: async () => { if (asText(await read(client, core, "get_vault_address")).toLowerCase() !== "0x0000000000000000000000000000000000000000") throw new Error("Core Vault address is no longer unbound without a checkpoint"); }, readback: async () => read(client, core, "get_vault_address"), expectedState: async () => { if (asText(await read(client, core, "get_vault_address")).toLowerCase() !== vault) throw new Error("Core Vault binding was not finalized"); return {vault}; }});
+    if (!cachedSourceParity(state.steps["deploy:vault"], vault, VAULT_SHA)) await deployedSourceParity(client, vault, VAULT_SHA, 3, POLL_MS, persistedDeploymentCode(state.steps["deploy:vault"]));
+    const bindingNeedsVaultWrite = bindingPreflight?.nextWrite === "vault:bind_core" || Boolean(state.steps["vault:bind_core"]?.tx);
+    const bindingNeedsCoreWrite = bindingNeedsVaultWrite || bindingPreflight?.nextWrite === "core:set_vault_address" || Boolean(state.steps["core:set_vault_address"]?.tx);
+    if (bindingNeedsVaultWrite) await executeStep({abi, client, account, state, core, vault, label: "vault:bind_core", functionName: "bind_core", args: [], summary: [], precondition: async () => { if (asText(await read(client, vault, "get_core_address")).toLowerCase() !== core) throw new Error("Vault Core constructor binding changed"); }, readback: async () => read(client, vault, "get_core_address"), expectedState: async () => { if (asText(await read(client, vault, "get_core_address")).toLowerCase() !== core) throw new Error("Vault Core binding was not finalized"); return {core}; }});
+    if (bindingNeedsCoreWrite) await executeStep({abi, client, account, state, core, vault, label: "core:set_vault_address", functionName: "set_vault_address", args: [address(CalldataAddress, vault)], summary: [{type: "Address", value: vault}], precondition: async () => { if (asText(await read(client, core, "get_vault_address")).toLowerCase() !== "0x0000000000000000000000000000000000000000") throw new Error("Core Vault address is no longer unbound without a checkpoint"); }, readback: async () => read(client, core, "get_vault_address"), expectedState: async () => { if (asText(await read(client, core, "get_vault_address")).toLowerCase() !== vault) throw new Error("Core Vault binding was not finalized"); return {vault}; }});
     if (asText(await read(client, core, "get_vault_address")).toLowerCase() !== vault || asText(await read(client, vault, "get_core_address")).toLowerCase() !== core) throw new Error("Bidirectional binding readback failed");
     state.observations.binding = {core, vault, status: "PASS"}; state.observations.schema = schema; saveState(state);
 
@@ -616,7 +750,7 @@ async function main() {
       while (instruction.ready_at && BigInt(instruction.ready_at) > BigInt(nowSeconds())) { console.log(`WAITING_FOR_CHALLENGE_WINDOW=${instruction.ready_at}`); await sleep(POLL_MS); instruction = asRecord(await read(client, core, "get_settlement_instruction", ["I-1"])); }
       const currentReservation = asRecord(await read(client, vault, "get_reservation", ["I-1"]));
       if (currentReservation.status === "RESERVED") { const settlement = await executeStep({abi, client, account, state, core, vault, label: "vault:request_release", functionName: "request_release", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => { const current = asRecord(await read(client, core, "get_settlement_instruction", ["I-1"])); if (current.direction !== "RELEASE_TO_COUNTERPARTY" || BigInt(current.ready_at) > BigInt(nowSeconds())) throw new Error("Settlement precondition is not ready"); }, readback: async () => read(client, vault, "get_reservation", ["I-1"]), expectedState: async () => read(client, vault, "get_reservation", ["I-1"])}); settlementTx = settlement.tx; }
-      let triggered: any[] = []; try { triggered = await client.getTriggeredTransactionIds({hash: settlementTx}); } catch (error: any) { externalObservation = {observation: "TRIGGERED_TRANSACTION_QUERY_UNSUPPORTED", error: String(error?.message ?? error)}; }
+      let triggered: any[] = []; try { triggered = await RPC_SCHEDULER.enqueue(`triggered:${settlementTx}`, () => client.getTriggeredTransactionIds({hash: settlementTx}), true); } catch (error: any) { externalObservation = {observation: "TRIGGERED_TRANSACTION_QUERY_UNSUPPORTED", error: String(error?.message ?? error)}; }
       if (!externalObservation.error) externalObservation = {observation: triggered.length ? "TRIGGERED_IDS_OBSERVED" : "PARENT_FINALIZED_CHILD_NOT_EXPOSED", triggeredTransactionIds: triggered};
     }
     writeArtifact("external-message-observation.json", {settlementTx: settlementTx || null, ...externalObservation});
