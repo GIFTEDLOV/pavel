@@ -114,6 +114,7 @@ export class QualificationRpcScheduler {
 }
 
 const RPC_SCHEDULER = new QualificationRpcScheduler();
+const UNSUPPORTED_READ_METHODS = new Set<string>();
 
 function readFixture(): Fixture { return JSON.parse(readFileSync(FIXTURE_PATH, "utf8")); }
 function nowSeconds() { return Math.floor(Date.now() / 1000); }
@@ -241,6 +242,60 @@ function assertIntent(intent: Record<string, any>, fixture: Fixture) {
   }
   if (asText(intent.intent_fingerprint) === "") throw new Error("Intent fingerprint is missing");
 }
+
+async function materializeJustInTimeValidity(client: any, state: State, fixture: Fixture, reason: string) {
+  const candidates = ["core:seal_mandate", "core:configure_mandate", "core:create_mandate", "core:register_agent"];
+  const sourceLabel = candidates.find((label) => state.steps[label]?.tx) ?? "";
+  const sourceTx = sourceLabel ? state.steps[sourceLabel].tx : "";
+  let sourceReceipt: any = null;
+  if (sourceTx) sourceReceipt = await RPC_SCHEDULER.enqueue(`jit-chain-time:${sourceTx}`, () => client.getTransaction({hash: sourceTx}), true);
+  const observedChainTimestamp = Number(sourceReceipt?.current_timestamp ?? sourceReceipt?.created_timestamp ?? 0);
+  if (!Number.isFinite(observedChainTimestamp) || observedChainTimestamp <= 0) throw new Error("Unable to obtain trustworthy finalized chain time for JIT Mandate validity");
+  const observedCreatedTimestamp = Number(sourceReceipt?.created_timestamp ?? observedChainTimestamp);
+  const observedLatency = Math.max(0, observedChainTimestamp - observedCreatedTimestamp);
+  const derived = deriveJustInTimeValidity(Math.max(observedChainTimestamp, Math.floor(Date.now() / 1000)), observedLatency, Number(fixture.validFrom), Number(fixture.expiresAt));
+  const wallObservedAt = Math.floor(Date.now() / 1000);
+  const chainNowEstimate = derived.chainNow;
+  const safetyMargin = derived.safetyMargin;
+  const horizon = derived.horizon;
+  const correctedValidFrom = derived.validFrom;
+  const correctedExpiresAt = derived.expiresAt;
+  const amendment = {
+    qualificationVersion: QUALIFICATION_VERSION,
+    status: "MATERIALIZED",
+    reason,
+    original: {validFrom: Number(fixture.validFrom), expiresAt: Number(fixture.expiresAt)},
+    corrected: {validFrom: correctedValidFrom, expiresAt: correctedExpiresAt},
+    chainTimeEvidence: {sourceLabel, sourceTx, observedChainTimestamp, observedCreatedTimestamp, observedLatency, wallObservedAt, chainNowEstimate},
+    timingSafetyMarginSeconds: safetyMargin,
+    horizonSeconds: horizon,
+    materializedAt: new Date().toISOString(),
+  };
+  writeArtifact("fixture-amendment.json", amendment);
+  return {...fixture, validFrom: correctedValidFrom, expiresAt: correctedExpiresAt};
+}
+
+export function deriveJustInTimeValidity(chainNow: number, observedLatency: number, originalValidFrom: number, originalExpiresAt: number) {
+  const horizon = Math.max(86400, originalExpiresAt - originalValidFrom);
+  const safetyMargin = Math.max(300, Math.min(1800, Math.max(0, observedLatency) * 2 + 120));
+  const validFrom = Math.floor(chainNow) + safetyMargin;
+  return {chainNow: Math.floor(chainNow), observedLatency, safetyMargin, horizon, validFrom, expiresAt: validFrom + horizon};
+}
+
+async function waitForMandateActivation(client: any, state: State, validFrom: number) {
+  if (QUALIFICATION_VERSION !== "qualification-v4") return;
+  const label = state.steps["core:seal_mandate:recovery"]?.tx ? "core:seal_mandate:recovery" : "core:seal_mandate";
+  const tx = state.steps[label]?.tx;
+  const receipt = tx ? await RPC_SCHEDULER.enqueue(`activation-time:${tx}`, () => client.getTransaction({hash: tx}), true) : null;
+  const chainAtObservation = Number(receipt?.current_timestamp ?? receipt?.created_timestamp ?? 0);
+  const wallAtObservation = Math.floor(Date.now() / 1000);
+  if (!Number.isFinite(chainAtObservation) || chainAtObservation <= 0) throw new Error("Unable to establish finalized chain time for Mandate activation wait");
+  while (chainAtObservation + Math.max(0, Math.floor(Date.now() / 1000) - wallAtObservation) < validFrom) {
+    writeArtifact("mandate-activation-wait.json", {status: "WAITING", validFrom, chainAtObservation, wallAtObservation, observedEstimate: chainAtObservation + Math.max(0, Math.floor(Date.now() / 1000) - wallAtObservation)});
+    await sleep(POLL_MS);
+  }
+  writeArtifact("mandate-activation-wait.json", {status: "ACTIVE", validFrom, chainAtObservation, wallAtObservation, observedEstimate: chainAtObservation + Math.max(0, Math.floor(Date.now() / 1000) - wallAtObservation)});
+}
 export function inspectResults(receipt: any) {
   const consensusStatus = String(receipt?.statusName ?? receipt?.status ?? "UNKNOWN").toUpperCase();
   const consensusRaw = receipt?.result_name ?? receipt?.resultName ?? receipt?.result;
@@ -268,8 +323,13 @@ export function inspectResults(receipt: any) {
 }
 export async function collectExecutionDiagnostics(client: any, tx: string, receipt: any) {
   const safeRead = async (label: string, action: () => Promise<any>) => {
+    if (UNSUPPORTED_READ_METHODS.has(label)) return {supported: false, cachedUnsupported: true, error: "cached Method not found"};
     try { return {supported: true, value: await RPC_SCHEDULER.enqueue(`error:${tx}:${label}`, action, true)}; }
-    catch (error: any) { return {supported: false, error: String(error?.message ?? error)}; }
+    catch (error: any) {
+      const message = String(error?.message ?? error);
+      if (/method not found|unsupported|does not exist/i.test(message)) UNSUPPORTED_READ_METHODS.add(label);
+      return {supported: false, error: message};
+    }
   };
   const leader = Array.isArray(receipt?.consensus_data?.leader_receipt) ? receipt.consensus_data.leader_receipt : Array.isArray(receipt?.leader_receipt) ? receipt.leader_receipt : [];
   const validators = Array.isArray(receipt?.consensus_data?.validators) ? receipt.consensus_data.validators : [];
@@ -645,13 +705,19 @@ async function simulateUnassessed(client: any, vault: string, account: any, inte
 async function main() {
   const deps = await loadPinnedDependencies();
   const {abi, chains, createAccount, createClient, CalldataAddress, Wallet, prompt} = deps;
-  const fixture = fixtureWithDefaults(readFixture());
+  let fixture = fixtureWithDefaults(readFixture());
   if (sha256File(CORE_SOURCE) !== CORE_SHA || sha256File(VAULT_SOURCE) !== VAULT_SHA) throw new Error(`Frozen ${QUALIFICATION_VERSION} source hashes do not match current contract source`);
   if (chains.studionet.id !== CHAIN_ID || chains.studionet.rpcUrls.default.http[0] !== RPC) throw new Error("Pinned SDK Studionet configuration mismatch");
   if (nowSeconds() >= Number(fixture.expiresAt)) throw new Error(`${QUALIFICATION_VERSION} fixture has expired`);
   const state = loadState();
   const readClient = createClient({chain: chains.studionet, endpoint: RPC, account: EXPECTED_SIGNER});
   if (await RPC_SCHEDULER.enqueue("chain-id", () => readClient.getChainId(), true) !== CHAIN_ID) throw new Error("RPC is not Studionet 61999");
+  if (QUALIFICATION_VERSION === "qualification-v4" && state.core && state.steps["core:seal_mandate"]?.status === "ERROR") {
+    const currentMandate = asRecord(await read(readClient, state.core, "get_mandate", ["M-1"]));
+    const recoveryConfigure = state.steps["core:configure_mandate:recovery"];
+    if (currentMandate.status === "DRAFT" && !recoveryConfigure) fixture = await materializeJustInTimeValidity(readClient, state, fixture, "FAILED_SEAL_VALID_FROM_PAST");
+    else if (recoveryConfigure && currentMandate.valid_from && currentMandate.expires_at) fixture = {...fixture, validFrom: Number(currentMandate.valid_from), expiresAt: Number(currentMandate.expires_at)};
+  }
   normalizeCompletedDeploymentCheckpoint(state, "deploy:core");
   normalizeCompletedDeploymentCheckpoint(state, "deploy:vault");
   const transactionPath = TRANSACTION_LEDGER_PATH;
@@ -682,6 +748,10 @@ async function main() {
     saveState(state);
     writeArtifact("vault-finalized-source-proof.json", {tx: state.steps["deploy:vault"]?.tx, address: state.vault, status: "FINALIZED", execution: state.steps["deploy:vault"]?.executionResult, consensusResult: state.steps["deploy:vault"]?.consensusResult, sourceParity: vaultProof});
   }
+  if (QUALIFICATION_VERSION === "qualification-v4" && state.core && (state.steps["core:configure_mandate:recovery"]?.status === "COMPLETE" || (state.steps["core:configure_mandate"]?.status === "COMPLETE" && state.steps["core:seal_mandate"]?.status !== "ERROR"))) {
+    const configuredMandate = asRecord(await read(readClient, state.core, "get_mandate", ["M-1"]));
+    if (configuredMandate.valid_from && configuredMandate.expires_at) fixture = {...fixture, validFrom: Number(configuredMandate.valid_from), expiresAt: Number(configuredMandate.expires_at)};
+  }
   let schema: any = state.observations.schema ?? null;
   if (state.core && state.vault && !schema) schema = await schemaParity(readClient, state.core, state.vault, persistedDeploymentCode(state.steps["deploy:core"]), persistedDeploymentCode(state.steps["deploy:vault"]));
   if (schema) state.observations.schema = schema;
@@ -698,7 +768,8 @@ async function main() {
   try { balanceRead = {supported: true, value: await rawRpc("eth_getBalance", [EXPECTED_SIGNER, "latest"])}; }
   catch (error: any) { balanceRead = {supported: false, error: String(error?.message ?? error)}; }
   writeArtifact("deployment-preflight.json", {status: "READY", firstWrite: "deploy:core", core: {sourceSha256: CORE_SHA, constructorArgs: []}, vault: {sourceSha256: VAULT_SHA, constructorArg: "typed Address(V4 Core authoritative address, resolved after Core finalization)"}, signer: EXPECTED_SIGNER, nonce: String(nonce), balance: balanceRead});
-  const plan = {qualificationVersion: QUALIFICATION_VERSION, network: "studionet", rpc: RPC, chainId: CHAIN_ID, signer: EXPECTED_SIGNER, selectedKeystore: {name: selectedKeystore.name, address: selectedKeystore.address}, sourceHashes: {core: CORE_SHA, vault: VAULT_SHA}, fixture: {validFrom: fixture.validFrom, expiresAt: fixture.expiresAt, amount: "1", authority: fixture.authority}, checkpoint: {core: state.core ?? null, vault: state.vault ?? null, steps: Object.keys(state.steps)}, deployerNonce: String(nonce), nextUnfinishedWrite: state.core ? (state.vault ? (bindingPreflight?.nextWrite ?? "binding") : "deploy:vault") : "deploy:core", rpcScheduler: RPC_SCHEDULER.snapshot(), explicitAuthorization: `user-authorized-${QUALIFICATION_VERSION}`};
+  const nextUnfinishedWrite = state.steps["core:seal_mandate"]?.status === "ERROR" ? "core:configure_mandate:recovery" : state.core ? (state.vault ? (bindingPreflight?.nextWrite ?? "binding") : "deploy:vault") : "deploy:core";
+  const plan = {qualificationVersion: QUALIFICATION_VERSION, network: "studionet", rpc: RPC, chainId: CHAIN_ID, signer: EXPECTED_SIGNER, selectedKeystore: {name: selectedKeystore.name, address: selectedKeystore.address}, sourceHashes: {core: CORE_SHA, vault: VAULT_SHA}, fixture: {validFrom: fixture.validFrom, expiresAt: fixture.expiresAt, amount: "1", authority: fixture.authority}, checkpoint: {core: state.core ?? null, vault: state.vault ?? null, steps: Object.keys(state.steps)}, deployerNonce: String(nonce), nextUnfinishedWrite, rpcScheduler: RPC_SCHEDULER.snapshot(), explicitAuthorization: `user-authorized-${QUALIFICATION_VERSION}`};
   writeArtifact(RUN_PLAN_FILE, plan);
   console.log(JSON.stringify({[`${QUALIFICATION_VERSION.toUpperCase().replace(/-/g, "_")}_PLAN`]: plan}, null, 2));
   if (process.argv.includes("--preflight-only")) { writeArtifact(RUN_STATUS_FILE, {status: "PREFLIGHT_ONLY", plan, noTransactionSubmitted: true}); return; }
@@ -768,7 +839,19 @@ async function main() {
       mandate = asRecord(await read(client, core, "get_mandate", ["M-1"]));
     }
     if (!Object.keys(mandate).length) throw new Error("M-1 was not created");
+    if (QUALIFICATION_VERSION === "qualification-v4" && state.steps["core:seal_mandate"]?.status === "ERROR" && mandate.status === "DRAFT" && asText(mandate.title) !== "") {
+      const args = ["M-1", fixture.title, fixture.purpose, fixture.constitution, fixture.permittedActivity, fixture.forbiddenActivity, BigInt(fixture.maximumSingleTransaction), BigInt(fixture.epochBudget), BigInt(fixture.epochDurationSeconds), BigInt(fixture.totalBudget), BigInt(fixture.validFrom), BigInt(fixture.expiresAt), BigInt(fixture.challengeWindowSeconds), fixture.evidencePolicy, fixture.deployedAuthorityConstraints, fixture.fulfillmentPolicy, fixture.recoveryPolicy, false];
+      await executeStep({abi, client, account, state, core, vault, label: "core:configure_mandate:recovery", functionName: "configure_mandate", args, summary: [{type: "string", value: "M-1"}, {type: "policy", value: `${QUALIFICATION_VERSION}-fixture-amendment`}, {type: "validity", validFrom: fixture.validFrom, expiresAt: fixture.expiresAt}], precondition: async () => { const item = asRecord(await read(client, core, "get_mandate", ["M-1"])); if (item.status !== "DRAFT" || asText(item.title) === "") throw new Error("M-1 recovery reconfiguration precondition failed"); }, readback: async () => read(client, core, "get_mandate", ["M-1"]), expectedState: async () => read(client, core, "get_mandate", ["M-1"]) });
+      mandate = asRecord(await read(client, core, "get_mandate", ["M-1"]));
+    }
     if (mandate.status === "DRAFT" && asText(mandate.title) === "") {
+      if (QUALIFICATION_VERSION === "qualification-v4") {
+        const amendmentPath = path.join(ARTIFACT_DIR, "fixture-amendment.json");
+        if (existsSync(amendmentPath)) {
+          const amendment = JSON.parse(readFileSync(amendmentPath, "utf8"));
+          if (amendment.corrected?.validFrom && amendment.corrected?.expiresAt) fixture = {...fixture, validFrom: amendment.corrected.validFrom, expiresAt: amendment.corrected.expiresAt};
+        } else fixture = await materializeJustInTimeValidity(client, state, fixture, "INITIAL_CONFIGURE_JIT_VALIDITY");
+      }
       const args = ["M-1", fixture.title, fixture.purpose, fixture.constitution, fixture.permittedActivity, fixture.forbiddenActivity, BigInt(fixture.maximumSingleTransaction), BigInt(fixture.epochBudget), BigInt(fixture.epochDurationSeconds), BigInt(fixture.totalBudget), BigInt(fixture.validFrom), BigInt(fixture.expiresAt), BigInt(fixture.challengeWindowSeconds), fixture.evidencePolicy, fixture.deployedAuthorityConstraints, fixture.fulfillmentPolicy, fixture.recoveryPolicy, false];
       await executeStep({abi, client, account, state, core, vault, label: "core:configure_mandate", functionName: "configure_mandate", args, summary: [{type: "string", value: "M-1"}, {type: "policy", value: `${QUALIFICATION_VERSION}-fixture`}], precondition: async () => { if (asRecord(await read(client, core, "get_mandate", ["M-1"])).status !== "DRAFT") throw new Error("M-1 is not configurable"); }, readback: async () => read(client, core, "get_mandate", ["M-1"]), expectedState: async () => read(client, core, "get_mandate", ["M-1"])});
       mandate = asRecord(await read(client, core, "get_mandate", ["M-1"]));
@@ -776,10 +859,12 @@ async function main() {
     assertMandate(mandate, fixture, "DRAFT");
     if (mandate.status === "DRAFT") {
       while (nowSeconds() < Number(fixture.validFrom)) { console.log(`WAITING_FOR_MANDATE_VALID_FROM=${fixture.validFrom}`); await sleep(POLL_MS); }
-      await executeStep({abi, client, account, state, core, vault, label: "core:seal_mandate", functionName: "seal_mandate", args: ["M-1"], summary: [{type: "string", value: "M-1"}], precondition: async () => { const item = asRecord(await read(client, core, "get_mandate", ["M-1"])); assertMandate(item, fixture, "DRAFT"); }, readback: async () => read(client, core, "get_mandate", ["M-1"]), expectedState: async () => { const item = asRecord(await read(client, core, "get_mandate", ["M-1"])); assertMandate(item, fixture, "SEALED"); return item; }});
+      const sealLabel = state.steps["core:seal_mandate"]?.status === "ERROR" ? "core:seal_mandate:recovery" : "core:seal_mandate";
+      await executeStep({abi, client, account, state, core, vault, label: sealLabel, functionName: "seal_mandate", args: ["M-1"], summary: [{type: "string", value: "M-1"}, {type: "validity", validFrom: fixture.validFrom, expiresAt: fixture.expiresAt}], precondition: async () => { const item = asRecord(await read(client, core, "get_mandate", ["M-1"])); assertMandate(item, fixture, "DRAFT"); }, readback: async () => read(client, core, "get_mandate", ["M-1"]), expectedState: async () => { const item = asRecord(await read(client, core, "get_mandate", ["M-1"])); assertMandate(item, fixture, "SEALED"); return item; }});
       mandate = asRecord(await read(client, core, "get_mandate", ["M-1"]));
     }
     assertMandate(mandate, fixture, "SEALED");
+    await waitForMandateActivation(client, state, Number(fixture.validFrom));
 
     let counterparty = asRecord(await read(client, core, "get_counterparty", ["C-1"]));
     if (!Object.keys(counterparty).length) {

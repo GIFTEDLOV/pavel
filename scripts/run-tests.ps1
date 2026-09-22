@@ -6,6 +6,7 @@ $nodeTests = @(
     "scripts/qualification/confirmation-regression.mjs",
     "scripts/qualification/reconciliation-regression.mjs",
     "scripts/qualification/v3-runner-regression.mjs",
+    "scripts/qualification/v4-runner-regression.mjs",
     "scripts/qualification/deployment-reconciliation-regression.mjs"
 )
 & node --experimental-strip-types --test $nodeTests

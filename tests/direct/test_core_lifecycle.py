@@ -5,6 +5,34 @@ import pytest
 from .conftest import BASE_TIME, add_evidence, address_text, configure_and_seal_core, create_submitted_intent
 
 
+def _configure_with_validity(core, direct_vm, direct_owner, direct_alice, valid_from, expires_at):
+    direct_vm.sender = direct_owner
+    core.register_principal()
+    core.register_agent(address_text(direct_alice), "operations-agent")
+    mandate_id = core.create_mandate(address_text(direct_alice), "")
+    core.configure_mandate(
+        mandate_id,
+        "Atlas infrastructure authority",
+        "Acquire Linux GPU infrastructure for Project Atlas",
+        "Do not externalize authority; preserve the principal's constitution.",
+        "Linux GPU infrastructure and directly necessary provider services",
+        "Advertising, trading, unrelated software, consumer purchases, personal services",
+        8 * 10**18,
+        25 * 10**18,
+        30 * 24 * 60 * 60,
+        100 * 10**18,
+        valid_from,
+        expires_at,
+        3600,
+        "Provider identity, quote, and fulfillment proof required.",
+        "provider.example",
+        "Exact provider, deliverable, quantity, and material service terms must be evidenced.",
+        "Refund only to the frozen principal on non-fulfillment.",
+        False,
+    )
+    return mandate_id
+
+
 @pytest.mark.direct
 def test_mandate_seals_and_becomes_immutable(direct_vm, direct_deploy, direct_owner, direct_alice):
     direct_vm.warp(BASE_TIME)
@@ -100,6 +128,33 @@ def test_transaction_datetime_accepts_backend_iso8601_timezone_variants(direct_v
     core.register_principal()
     core.register_agent(address_text(direct_alice), "agent")
     assert core.create_mandate(address_text(direct_alice), "") == "M-1"
+
+
+@pytest.mark.direct
+def test_seal_rejects_past_valid_from_without_mutating_draft(direct_vm, direct_deploy, direct_owner, direct_alice):
+    direct_vm.warp(BASE_TIME)
+    core = direct_deploy("contracts/pavel_core.py")
+    mandate_id = _configure_with_validity(core, direct_vm, direct_owner, direct_alice, 1893455999, 1924992000)
+    with direct_vm.expect_revert("mandate valid_from is before transaction time"):
+        direct_vm.sender = direct_owner
+        core.seal_mandate(mandate_id)
+    mandate = json.loads(core.get_mandate(mandate_id))
+    assert mandate["status"] == "DRAFT"
+    assert mandate["valid_from"] == "1893455999"
+    assert mandate["definition_hash"] == ""
+
+
+@pytest.mark.direct
+def test_seal_accepts_future_valid_from_and_intent_waits_for_activation(direct_vm, direct_deploy, direct_owner, direct_alice):
+    direct_vm.warp(BASE_TIME)
+    core = direct_deploy("contracts/pavel_core.py")
+    mandate_id = _configure_with_validity(core, direct_vm, direct_owner, direct_alice, 1893456300, 1924992000)
+    direct_vm.sender = direct_owner
+    core.seal_mandate(mandate_id)
+    assert json.loads(core.get_mandate(mandate_id))["status"] == "SEALED"
+    direct_vm.sender = direct_alice
+    with direct_vm.expect_revert("mandate is not currently valid"):
+        core.create_intent(mandate_id, "C-1", address_text(direct_owner), 1, "title", "purpose", "deliverable", "terms", "criteria", 1924990000)
 
 
 @pytest.mark.direct
