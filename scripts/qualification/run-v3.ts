@@ -694,6 +694,10 @@ async function main() {
   const selectedKeystore = findExpectedKeystore();
   if (!sameAddress(selectedKeystore.address, EXPECTED_SIGNER)) throw new Error("Expected qualification keystore resolution failed");
   const nonce = await RPC_SCHEDULER.enqueue("deployer-nonce", () => readClient.getCurrentNonce({address: EXPECTED_SIGNER}), true);
+  let balanceRead: any;
+  try { balanceRead = {supported: true, value: await rawRpc("eth_getBalance", [EXPECTED_SIGNER, "latest"])}; }
+  catch (error: any) { balanceRead = {supported: false, error: String(error?.message ?? error)}; }
+  writeArtifact("deployment-preflight.json", {status: "READY", firstWrite: "deploy:core", core: {sourceSha256: CORE_SHA, constructorArgs: []}, vault: {sourceSha256: VAULT_SHA, constructorArg: "typed Address(V4 Core authoritative address, resolved after Core finalization)"}, signer: EXPECTED_SIGNER, nonce: String(nonce), balance: balanceRead});
   const plan = {qualificationVersion: QUALIFICATION_VERSION, network: "studionet", rpc: RPC, chainId: CHAIN_ID, signer: EXPECTED_SIGNER, selectedKeystore: {name: selectedKeystore.name, address: selectedKeystore.address}, sourceHashes: {core: CORE_SHA, vault: VAULT_SHA}, fixture: {validFrom: fixture.validFrom, expiresAt: fixture.expiresAt, amount: "1", authority: fixture.authority}, checkpoint: {core: state.core ?? null, vault: state.vault ?? null, steps: Object.keys(state.steps)}, deployerNonce: String(nonce), nextUnfinishedWrite: state.core ? (state.vault ? (bindingPreflight?.nextWrite ?? "binding") : "deploy:vault") : "deploy:core", rpcScheduler: RPC_SCHEDULER.snapshot(), explicitAuthorization: `user-authorized-${QUALIFICATION_VERSION}`};
   writeArtifact(RUN_PLAN_FILE, plan);
   console.log(JSON.stringify({[`${QUALIFICATION_VERSION.toUpperCase().replace(/-/g, "_")}_PLAN`]: plan}, null, 2));
