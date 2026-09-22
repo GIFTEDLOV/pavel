@@ -10,6 +10,7 @@ const {
   CAN_USE_ACTIVE_MANDATE,
   minimumSafeSealMargin,
   assertSealWindowOpen,
+  assertEvidenceTransport,
   checkpointHasCompletedSuccess,
   checkpointHasFailedAttempt,
   rpcCapabilityStatus,
@@ -98,4 +99,54 @@ test("V4 wrapper resumes the existing pair without deployment or new version", (
   assert.doesNotMatch(wrapperSource, /qualification-v5/);
 });
 
-console.log("QUALIFICATION_V4_RUNNER_REGRESSION: 10 passed");
+test("scheme-less host is rejected before counterparty broadcast", () => {
+  assert.throws(() => assertEvidenceTransport("docs.genlayer.com", "docs.genlayer.com"), /exactly https/);
+  assert.match(runnerSource, /assertEvidenceTransport\(evidenceUrl, evidenceAuthority\)/);
+});
+
+test("HTTP evidence transport is rejected before broadcast", () => {
+  assert.throws(() => assertEvidenceTransport("http://docs.genlayer.com/robots.txt", "docs.genlayer.com"), /exactly https/);
+});
+
+test("valid HTTPS evidence transport is accepted", () => {
+  assert.deepEqual(assertEvidenceTransport("https://docs.genlayer.com/robots.txt", "docs.genlayer.com"), {
+    url: "https://docs.genlayer.com/robots.txt",
+    authority: "docs.genlayer.com",
+    hostname: "docs.genlayer.com",
+    protocol: "https:",
+  });
+});
+
+test("evidence authority remains distinct from evidence transport", () => {
+  assert.match(runnerSource, /evidenceAuthority: authority/);
+  assert.match(runnerSource, /evidenceTransportUrl/);
+  assert.match(runnerSource, /semantic: "evidence_url", value: evidenceUrl/);
+  assert.match(runnerSource, /semantic: "evidence_authority", value: evidenceAuthority/);
+  assert.doesNotMatch(runnerSource, /functionName: "register_counterparty"[^\n]+fixture\.authority/);
+});
+
+test("fixture authority cannot accidentally populate register_counterparty evidence_url", () => {
+  const registerBlock = runnerSource.slice(runnerSource.indexOf("const counterpartyLabel = counterpartyStepLabel"), runnerSource.indexOf('counterparty = asRecord', runnerSource.indexOf("const counterpartyLabel = counterpartyStepLabel")));
+  assert.match(registerBlock, /args: counterpartyArgs/);
+  assert.match(registerBlock, /const counterpartyArgs = \[address\(CalldataAddress, EXPECTED_SIGNER\), fixture\.counterpartyLabel, evidenceUrl\]/);
+  assert.doesNotMatch(registerBlock, /fixture\.authority/);
+});
+
+test("failed counterparty transaction is historical and corrected step gets a new label", () => {
+  const failed = {steps: {"core:register_counterparty": {status: "ERROR", tx: "0xfailed"}}, completedSteps: {}, failedAttempts: [{label: "core:register_counterparty", status: "ERROR", tx: "0xfailed"}]};
+  assert.equal(checkpointHasCompletedSuccess(failed, "core:register_counterparty"), false);
+  assert.equal(checkpointHasFailedAttempt(failed, "core:register_counterparty"), true);
+  assert.match(runnerSource, /core:register_counterparty:corrected/);
+  assert.match(runnerSource, /hasHistoricalCounterpartyFailure/);
+  assert.match(runnerSource, /Checkpoint contains explicit failed transaction/);
+});
+
+test("restart preserves the successful sealed-active checkpoint", () => {
+  const sealCompletion = runnerSource.indexOf('assertMandate(mandate, fixture, "SEALED")');
+  const activationWait = runnerSource.indexOf("waitForMandateActivation(client, state, mandate", sealCompletion);
+  assert.ok(sealCompletion >= 0 && activationWait > sealCompletion);
+  assert.match(runnerSource, /counterpartyPreflight/);
+  assert.match(runnerSource, /nextUnfinishedWrite.*core:register_counterparty:corrected/);
+});
+
+console.log("QUALIFICATION_V4_RUNNER_REGRESSION: 17 passed");

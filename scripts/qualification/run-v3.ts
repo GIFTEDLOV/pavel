@@ -289,14 +289,46 @@ function calldataProof(abi: any, functionName: string, args: any[]) {
   if (!Array.isArray(normalizedArgs) || normalizedArgs.length !== args.length) throw new Error(`${functionName} typed calldata argument count mismatch`);
   return {method: functionName, argumentCount: normalizedArgs.length, roundTrip: abi.calldata.toString(decoded), encodedBytes: Array.from(encoded)};
 }
+export function assertEvidenceTransport(evidenceUrl: string, evidenceAuthority: string) {
+  const url = String(evidenceUrl ?? "").trim();
+  const authority = String(evidenceAuthority ?? "").trim().toLowerCase();
+  if (!url.startsWith("https://")) throw new Error("Evidence URL must start with exactly https://");
+  if (url.length > 2048 || /\s/.test(url)) throw new Error("Evidence URL length/content is invalid");
+  let parsed: URL;
+  try { parsed = new URL(url); } catch { throw new Error("Evidence URL parser rejected the URL"); }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password || !parsed.hostname) throw new Error("Evidence URL must be a credential-free HTTPS URL");
+  if (!authority || /[\/@\s]/.test(authority) || parsed.hostname.toLowerCase() !== authority) throw new Error(`Evidence URL hostname must match evidence authority ${authority}`);
+  return {url, authority, hostname: parsed.hostname.toLowerCase(), protocol: parsed.protocol};
+}
+function assertCounterpartyCalldataRoundTrip(abi: any, args: any[]) {
+  const proof = calldataProof(abi, "register_counterparty", args);
+  const encoded = abi.calldata.encode(abi.calldata.makeCalldataObject("register_counterparty", args, undefined));
+  const decoded = abi.calldata.decode(encoded);
+  const map = decoded instanceof Map ? decoded : new Map(Object.entries(decoded));
+  const decodedArgs: any[] = map.get("args") ?? [];
+  const addressArg = decodedArgs[0]?.bytes ? `0x${Buffer.from(decodedArgs[0].bytes).toString("hex")}` : String(decodedArgs[0] ?? "");
+  if (decodedArgs.length !== 3 || !sameAddress(addressArg, args[0]?.bytes ? `0x${Buffer.from(args[0].bytes).toString("hex")}` : args[0]) || decodedArgs[1] !== args[1] || decodedArgs[2] !== args[2]) {
+    throw new Error("register_counterparty typed calldata round-trip mismatch");
+  }
+  return proof;
+}
 function fixtureWithDefaults(fixture: Fixture) {
   const authority = String(fixture.authority ?? "").trim().toLowerCase();
+  const evidenceTransportUrl = String(fixture.evidence?.url ?? fixture.evidenceUrl ?? "").trim();
+  assertEvidenceTransport(evidenceTransportUrl, authority);
   const constraints = String(fixture.authorityConstraints ?? authority).trim().toLowerCase().replace(/ /g, "");
   return {...fixture,
     title: fixture.title,
     constitution: fixture.constitution,
     evidencePolicy: fixture.evidencePolicy,
     authorityConstraints: fixture.authorityConstraints,
+    evidenceAuthority: authority,
+    evidenceTransportUrl,
+    evidence: {authority, url: evidenceTransportUrl},
+    // Keep the legacy names as policy identity/transport aliases for readback
+    // compatibility; writes use the explicit semantic fields above.
+    authority,
+    evidenceUrl: evidenceTransportUrl,
     deployedAuthorityConstraints: constraints.split(",").includes(authority) ? constraints : authority,
     fulfillmentPolicy: fixture.fulfillmentPolicy,
     recoveryPolicy: fixture.recoveryPolicy,
@@ -541,9 +573,18 @@ async function reconcileExistingCompletedReadOnly(client: any, step: Step, expec
   if (observation.executionResult === "UNKNOWN" && expectedState) await expectedState();
   return {receipt, ...observation};
 }
+async function reconcileExistingFailedReadOnly(client: any, step: Step) {
+  if (!step?.tx) throw new Error(`Failed checkpoint ${step?.label ?? "unknown"} has no transaction hash`);
+  const receipt = await RPC_SCHEDULER.enqueue(`resume-failed:${step.tx}:status`, () => client.getTransaction({hash: step.tx}), true);
+  const status = String(receipt?.statusName ?? receipt?.status ?? "");
+  if (status !== "FINALIZED") throw new Error(`Historical failed checkpoint ${step.label} is not finalized: ${status || "UNKNOWN"}`);
+  const observation = inspectResults(receipt);
+  if (observation.executionResult !== "ERROR") throw new Error(`Historical failed checkpoint ${step.label} no longer reconciles as ERROR`);
+  return {receipt, ...observation, replayed: false};
+}
 
-async function executeStep(config: {abi: any; client: any; account: any; state: State; core: string; vault: string; label: string; functionName: string; args: any[]; summary: any[]; precondition: () => Promise<void>; readback: () => Promise<any>; expectedState?: () => Promise<any>; value?: bigint}) {
-  const {abi, client, account, state, core, vault, label, functionName, args, summary, precondition, readback, expectedState, value = 0n} = config;
+async function executeStep(config: {abi: any; client: any; account: any; state: State; core: string; vault: string; label: string; functionName: string; args: any[]; summary: any[]; precondition: () => Promise<void>; readback: () => Promise<any>; expectedState?: () => Promise<any>; calldataValidator?: (abi: any, args: any[]) => any; value?: bigint}) {
+  const {abi, client, account, state, core, vault, label, functionName, args, summary, precondition, readback, expectedState, calldataValidator, value = 0n} = config;
   normalizeCheckpointSemantics(state);
   const existing = state.steps[label];
   if (state.completedSteps[label]?.status === "COMPLETE") {
@@ -556,6 +597,7 @@ async function executeStep(config: {abi: any; client: any; account: any; state: 
     if (existing.status === "ERROR" || state.failedAttempts.some((attempt) => attempt.tx === tx)) throw new Error(`Checkpoint contains explicit failed transaction for ${label}: ${existing.error ?? "unknown"}`);
   } else {
     proof = calldataProof(abi, functionName, args);
+    if (calldataValidator) proof = calldataValidator(abi, args);
     await precondition();
     tx = String(await RPC_SCHEDULER.enqueue(`write:${label}`, () => client.writeContract({address: targetFor(label, core, vault), functionName, args, value, account}), false));
     const entry: Step = {label, tx, status: "SUBMITTED"};
@@ -874,6 +916,12 @@ async function simulateUnassessed(client: any, vault: string, account: any, inte
 function hasHistoricalSealFailure(state: State) {
   return state.failedAttempts.some((attempt) => attempt.label.startsWith("core:seal_mandate") || attempt.label === "core:seal_mandate") || Object.entries(state.steps).some(([label, step]) => label.startsWith("core:seal_mandate") && step.status === "ERROR");
 }
+function hasHistoricalCounterpartyFailure(state: State) {
+  return checkpointHasFailedAttempt(state, "core:register_counterparty") || state.steps["core:register_counterparty"]?.status === "ERROR";
+}
+function counterpartyStepLabel(state: State, counterparty: Record<string, any>) {
+  return !Object.keys(counterparty).length && hasHistoricalCounterpartyFailure(state) ? "core:register_counterparty:corrected" : "core:register_counterparty";
+}
 
 function nextRecoveryLabels(state: State, startAttempt = 2) {
   for (let attempt = startAttempt; attempt <= 20; attempt += 1) {
@@ -898,6 +946,11 @@ async function main() {
   const state = loadState();
   const readClient = createClient({chain: chains.studionet, endpoint: RPC, account: EXPECTED_SIGNER});
   if (await RPC_SCHEDULER.enqueue("chain-id", () => readClient.getChainId(), true) !== CHAIN_ID) throw new Error("RPC is not Studionet 61999");
+  const failedCounterpartyCheckpoint = state.failedAttempts.find((attempt) => attempt.label === "core:register_counterparty" && attempt.tx);
+  if (failedCounterpartyCheckpoint) {
+    const reconciliation = await reconcileExistingFailedReadOnly(readClient, failedCounterpartyCheckpoint);
+    writeArtifact("failed-counterparty-reconciliation.json", {label: failedCounterpartyCheckpoint.label, tx: failedCounterpartyCheckpoint.tx, status: reconciliation.receipt?.statusName ?? reconciliation.receipt?.status, execution: reconciliation.executionResult, error: failedCounterpartyCheckpoint.error ?? "", replayed: reconciliation.replayed});
+  }
   let recoveryPlan: {configureLabel: string; sealLabel: string} | null = null;
   if (QUALIFICATION_VERSION === "qualification-v4" && state.core && hasHistoricalSealFailure(state)) {
     const currentMandate = asRecord(await read(readClient, state.core, "get_mandate", ["M-1"]));
@@ -962,8 +1015,9 @@ async function main() {
   try { balanceRead = {supported: true, value: await rawRpc("eth_getBalance", [EXPECTED_SIGNER, "latest"])}; }
   catch (error: any) { balanceRead = {supported: false, error: String(error?.message ?? error)}; }
   writeArtifact("deployment-preflight.json", {status: "READY", firstWrite: "deploy:core", core: {sourceSha256: CORE_SHA, constructorArgs: []}, vault: {sourceSha256: VAULT_SHA, constructorArg: "typed Address(V4 Core authoritative address, resolved after Core finalization)"}, signer: EXPECTED_SIGNER, nonce: String(nonce), balance: balanceRead});
-  const nextUnfinishedWrite = recoveryPlan?.configureLabel ?? (state.steps["core:seal_mandate"]?.status === "ERROR" ? "core:configure_mandate:recovery-2" : state.core ? (state.vault ? (bindingPreflight?.nextWrite ?? "binding") : "deploy:vault") : "deploy:core");
-  const plan = {qualificationVersion: QUALIFICATION_VERSION, network: "studionet", rpc: RPC, chainId: CHAIN_ID, signer: EXPECTED_SIGNER, selectedKeystore: {name: selectedKeystore.name, address: selectedKeystore.address}, sourceHashes: {core: CORE_SHA, vault: VAULT_SHA}, fixture: {validFrom: fixture.validFrom, expiresAt: fixture.expiresAt, amount: "1", authority: fixture.authority}, checkpoint: {core: state.core ?? null, vault: state.vault ?? null, steps: Object.keys(state.steps)}, deployerNonce: String(nonce), nextUnfinishedWrite, rpcScheduler: RPC_SCHEDULER.snapshot(), explicitAuthorization: `user-authorized-${QUALIFICATION_VERSION}`};
+  const counterpartyPreflight = state.core ? asRecord(await read(readClient, state.core, "get_counterparty", ["C-1"])) : {};
+  const nextUnfinishedWrite = recoveryPlan?.configureLabel ?? ((!Object.keys(counterpartyPreflight).length && hasHistoricalCounterpartyFailure(state)) ? "core:register_counterparty:corrected" : state.steps["core:seal_mandate"]?.status === "ERROR" ? "core:configure_mandate:recovery-2" : state.core ? (state.vault ? (bindingPreflight?.nextWrite ?? "binding") : "deploy:vault") : "deploy:core");
+  const plan = {qualificationVersion: QUALIFICATION_VERSION, network: "studionet", rpc: RPC, chainId: CHAIN_ID, signer: EXPECTED_SIGNER, selectedKeystore: {name: selectedKeystore.name, address: selectedKeystore.address}, sourceHashes: {core: CORE_SHA, vault: VAULT_SHA}, fixture: {validFrom: fixture.validFrom, expiresAt: fixture.expiresAt, amount: "1", authority: fixture.evidenceAuthority, evidenceUrl: fixture.evidenceTransportUrl}, checkpoint: {core: state.core ?? null, vault: state.vault ?? null, steps: Object.keys(state.steps)}, counterpartyPreflight, deployerNonce: String(nonce), nextUnfinishedWrite, rpcScheduler: RPC_SCHEDULER.snapshot(), explicitAuthorization: `user-authorized-${QUALIFICATION_VERSION}`};
   writeArtifact(RUN_PLAN_FILE, plan);
   console.log(JSON.stringify({[`${QUALIFICATION_VERSION.toUpperCase().replace(/-/g, "_")}_PLAN`]: plan}, null, 2));
   if (process.argv.includes("--preflight-only")) { writeArtifact(RUN_STATUS_FILE, {status: "PREFLIGHT_ONLY", plan, noTransactionSubmitted: true}); return; }
@@ -1084,10 +1138,14 @@ async function main() {
     let counterparty = asRecord(await read(client, core, "get_counterparty", ["C-1"]));
     if (!Object.keys(counterparty).length) {
       if (!sameAddress(fixture.counterpartyWallet, EXPECTED_SIGNER)) throw new Error("Fixture counterparty is not the controlled qualification signer");
-      await executeStep({abi, client, account, state, core, vault, label: "core:register_counterparty", functionName: "register_counterparty", args: [address(CalldataAddress, EXPECTED_SIGNER), fixture.counterpartyLabel, fixture.authority], summary: [{type: "Address", value: EXPECTED_SIGNER}, {type: "string", value: fixture.counterpartyLabel}, {type: "string", value: fixture.authority}], precondition: async () => {}, readback: async () => read(client, core, "get_counterparty", ["C-1"]), expectedState: async () => { const item = asRecord(await read(client, core, "get_counterparty", ["C-1"])); if (!sameAddress(item.bound_wallet, EXPECTED_SIGNER) || item.authority_origin !== fixture.authority || item.label !== fixture.counterpartyLabel || item.active !== true) throw new Error("Counterparty state was not finalized"); return item; }});
+      const counterpartyLabel = counterpartyStepLabel(state, counterparty);
+      const evidenceAuthority = fixture.evidenceAuthority;
+      const evidenceUrl = fixture.evidenceTransportUrl;
+      const counterpartyArgs = [address(CalldataAddress, EXPECTED_SIGNER), fixture.counterpartyLabel, evidenceUrl];
+      await executeStep({abi, client, account, state, core, vault, label: counterpartyLabel, functionName: "register_counterparty", args: counterpartyArgs, summary: [{type: "Address", semantic: "counterparty_address", value: EXPECTED_SIGNER}, {type: "string", semantic: "counterparty_identity", value: fixture.counterpartyLabel}, {type: "string", semantic: "evidence_url", value: evidenceUrl}, {type: "string", semantic: "evidence_authority", value: evidenceAuthority}], calldataValidator: assertCounterpartyCalldataRoundTrip, precondition: async () => { assertEvidenceTransport(evidenceUrl, evidenceAuthority); }, readback: async () => read(client, core, "get_counterparty", ["C-1"]), expectedState: async () => { const item = asRecord(await read(client, core, "get_counterparty", ["C-1"])); if (!sameAddress(item.bound_wallet, EXPECTED_SIGNER) || item.authority_origin !== evidenceAuthority || item.label !== fixture.counterpartyLabel || item.active !== true) throw new Error("Counterparty state was not finalized"); return item; }});
       counterparty = asRecord(await read(client, core, "get_counterparty", ["C-1"]));
     }
-    if (!sameAddress(counterparty.bound_wallet, EXPECTED_SIGNER) || counterparty.authority_origin !== fixture.authority || counterparty.label !== fixture.counterpartyLabel || counterparty.active !== true) throw new Error("Counterparty identity readback mismatch");
+    if (!sameAddress(counterparty.bound_wallet, EXPECTED_SIGNER) || counterparty.authority_origin !== fixture.evidenceAuthority || counterparty.label !== fixture.counterpartyLabel || counterparty.active !== true) throw new Error("Counterparty identity readback mismatch");
 
     const beforeAccounting = assertAccounting(await read(client, vault, "get_accounting", ["M-1"]), "Pre-deposit mandate");
     if (BigInt(beforeAccounting.deposited) < 1n) {
@@ -1107,7 +1165,7 @@ async function main() {
     if (intent.status === "DRAFT") { await executeStep({abi, client, account, state, core, vault, label: "core:submit_intent:positive", functionName: "submit_intent", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => {}, readback: async () => read(client, core, "get_intent", ["I-1"]), expectedState: async () => read(client, core, "get_intent", ["I-1"])}); intent = asRecord(await read(client, core, "get_intent", ["I-1"])); }
 
     if (["SUBMITTED", "EVIDENCE_RETRY_REQUIRED", "EVIDENCE_RECOVERY_REQUIRED", "EVIDENCE_REPAIR_REQUIRED"].includes(intent.status) && asText(await read(client, core, "get_evidence", ["I-1", 0n])) === "") {
-      await executeStep({abi, client, account, state, core, vault, label: "core:define_evidence:authorization", functionName: "define_evidence", args: ["I-1", "PRODUCT_SERVICE", fixture.evidenceUrl, fixture.authority, "", 0n, fixture.authority, 0n], summary: [{type: "evidence", kind: "PRODUCT_SERVICE", authority: fixture.authority, transport: fixture.evidenceUrl}], precondition: async () => {}, readback: async () => read(client, core, "get_evidence", ["I-1", 0n]), expectedState: async () => read(client, core, "get_evidence", ["I-1", 0n])});
+      await executeStep({abi, client, account, state, core, vault, label: "core:define_evidence:authorization", functionName: "define_evidence", args: ["I-1", "PRODUCT_SERVICE", fixture.evidenceTransportUrl, fixture.evidenceAuthority, "", 0n, fixture.evidenceAuthority, 0n], summary: [{type: "evidence", kind: "PRODUCT_SERVICE", authority: fixture.evidenceAuthority, transport: fixture.evidenceTransportUrl}], precondition: async () => { assertEvidenceTransport(fixture.evidenceTransportUrl, fixture.evidenceAuthority); }, readback: async () => read(client, core, "get_evidence", ["I-1", 0n]), expectedState: async () => read(client, core, "get_evidence", ["I-1", 0n])});
     }
     intent = asRecord(await read(client, core, "get_intent", ["I-1"]));
     if (["SUBMITTED", "EVIDENCE_RETRY_REQUIRED", "EVIDENCE_RECOVERY_REQUIRED", "EVIDENCE_REPAIR_REQUIRED"].includes(intent.status)) { await executeStep({abi, client, account, state, core, vault, label: "core:stage_evidence:authorization", functionName: "stage_evidence", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => {}, readback: async () => evidenceReadback(client, core, "I-1", 0n), expectedState: async () => evidenceReadback(client, core, "I-1", 0n)}); intent = asRecord(await read(client, core, "get_intent", ["I-1"])); }
@@ -1127,7 +1185,7 @@ async function main() {
 
     intent = asRecord(await read(client, core, "get_intent", ["I-1"]));
     if (intent.status === "AUTHORIZED") { await executeStep({abi, client, account, state, core, vault, label: "core:start_fulfillment", functionName: "start_fulfillment", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => { if (asRecord(await read(client, vault, "get_reservation", ["I-1"])).status !== "RESERVED") throw new Error("Fulfillment requires RESERVED state"); }, readback: async () => read(client, core, "get_intent", ["I-1"]), expectedState: async () => read(client, core, "get_intent", ["I-1"])}); intent = asRecord(await read(client, core, "get_intent", ["I-1"])); }
-    if (intent.status === "FULFILLMENT_PENDING" && asText(await read(client, core, "get_evidence", ["I-1", 1n])) === "") await executeStep({abi, client, account, state, core, vault, label: "core:define_evidence:fulfillment", functionName: "define_evidence", args: ["I-1", "FULFILLMENT", fixture.evidenceUrl, fixture.authority, "", 0n, fixture.authority, 1n], summary: [{type: "evidence", kind: "FULFILLMENT", authority: fixture.authority, transport: fixture.evidenceUrl}], precondition: async () => {}, readback: async () => read(client, core, "get_evidence", ["I-1", 1n]), expectedState: async () => read(client, core, "get_evidence", ["I-1", 1n])});
+    if (intent.status === "FULFILLMENT_PENDING" && asText(await read(client, core, "get_evidence", ["I-1", 1n])) === "") await executeStep({abi, client, account, state, core, vault, label: "core:define_evidence:fulfillment", functionName: "define_evidence", args: ["I-1", "FULFILLMENT", fixture.evidenceTransportUrl, fixture.evidenceAuthority, "", 0n, fixture.evidenceAuthority, 1n], summary: [{type: "evidence", kind: "FULFILLMENT", authority: fixture.evidenceAuthority, transport: fixture.evidenceTransportUrl}], precondition: async () => { assertEvidenceTransport(fixture.evidenceTransportUrl, fixture.evidenceAuthority); }, readback: async () => read(client, core, "get_evidence", ["I-1", 1n]), expectedState: async () => read(client, core, "get_evidence", ["I-1", 1n])});
     if (intent.status === "FULFILLMENT_PENDING") { await executeStep({abi, client, account, state, core, vault, label: "core:stage_evidence:fulfillment", functionName: "stage_evidence", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => {}, readback: async () => evidenceReadback(client, core, "I-1", 1n), expectedState: async () => evidenceReadback(client, core, "I-1", 1n)}); await executeStep({abi, client, account, state, core, vault, label: "core:assess_fulfillment", functionName: "assess_fulfillment", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => {}, readback: async () => read(client, core, "get_intent", ["I-1"]), expectedState: async () => read(client, core, "get_intent", ["I-1"])}); intent = asRecord(await read(client, core, "get_intent", ["I-1"])); }
     const fulfillment = asRecord(intent.fulfillment);
     writeArtifact("fulfillment-vector.json", {intentId: "I-1", status: intent.status, result: fulfillment.vector?.outcome ?? "", vector: fulfillment.vector ?? {}, fullFulfillment: fulfillment});
