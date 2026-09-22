@@ -682,11 +682,11 @@ async function main() {
     saveState(state);
     writeArtifact("vault-finalized-source-proof.json", {tx: state.steps["deploy:vault"]?.tx, address: state.vault, status: "FINALIZED", execution: state.steps["deploy:vault"]?.executionResult, consensusResult: state.steps["deploy:vault"]?.consensusResult, sourceParity: vaultProof});
   }
-  if (!state.core || !state.vault) throw new Error(`${QUALIFICATION_VERSION} deployment checkpoint is incomplete after read-only reconciliation`);
-  const schema = await schemaParity(readClient, state.core, state.vault, persistedDeploymentCode(state.steps["deploy:core"]), persistedDeploymentCode(state.steps["deploy:vault"]));
-  state.observations.schema = schema;
+  let schema: any = state.observations.schema ?? null;
+  if (state.core && state.vault && !schema) schema = await schemaParity(readClient, state.core, state.vault, persistedDeploymentCode(state.steps["deploy:core"]), persistedDeploymentCode(state.steps["deploy:vault"]));
+  if (schema) state.observations.schema = schema;
   let bindingPreflight: any = state.observations.bindingPreflight;
-  if (!state.observations.binding?.status) bindingPreflight = await prepareBindingPreflight(abi, readClient, state, state.core, state.vault, CalldataAddress);
+  if (state.core && state.vault && !state.observations.binding?.status && !bindingPreflight) bindingPreflight = await prepareBindingPreflight(abi, readClient, state, state.core, state.vault, CalldataAddress);
   if (state.steps["core:create_mandate"]?.status === "ERROR") {
     writeArtifact(RUN_STATUS_FILE, {status: "BLOCKED_DEPLOYED_SOURCE_DEFECT", noTransactionSubmitted: true, failedStep: "core:create_mandate", nextUnfinishedWrite: "replacement-deployment-requires-explicit-authorization"});
     throw new Error(`${QUALIFICATION_VERSION} cannot continue: deployed Core has a finalized create_mandate source error; replacement deployment requires explicit authorization`);
@@ -694,7 +694,7 @@ async function main() {
   const selectedKeystore = findExpectedKeystore();
   if (!sameAddress(selectedKeystore.address, EXPECTED_SIGNER)) throw new Error("Expected qualification keystore resolution failed");
   const nonce = await RPC_SCHEDULER.enqueue("deployer-nonce", () => readClient.getCurrentNonce({address: EXPECTED_SIGNER}), true);
-  const plan = {qualificationVersion: QUALIFICATION_VERSION, network: "studionet", rpc: RPC, chainId: CHAIN_ID, signer: EXPECTED_SIGNER, selectedKeystore: {name: selectedKeystore.name, address: selectedKeystore.address}, sourceHashes: {core: CORE_SHA, vault: VAULT_SHA}, fixture: {validFrom: fixture.validFrom, expiresAt: fixture.expiresAt, amount: "1", authority: fixture.authority}, checkpoint: {core: state.core ?? null, vault: state.vault ?? null, steps: Object.keys(state.steps)}, deployerNonce: String(nonce), nextUnfinishedWrite: bindingPreflight?.nextWrite ?? "unknown", rpcScheduler: RPC_SCHEDULER.snapshot(), explicitAuthorization: `user-authorized-${QUALIFICATION_VERSION}`};
+  const plan = {qualificationVersion: QUALIFICATION_VERSION, network: "studionet", rpc: RPC, chainId: CHAIN_ID, signer: EXPECTED_SIGNER, selectedKeystore: {name: selectedKeystore.name, address: selectedKeystore.address}, sourceHashes: {core: CORE_SHA, vault: VAULT_SHA}, fixture: {validFrom: fixture.validFrom, expiresAt: fixture.expiresAt, amount: "1", authority: fixture.authority}, checkpoint: {core: state.core ?? null, vault: state.vault ?? null, steps: Object.keys(state.steps)}, deployerNonce: String(nonce), nextUnfinishedWrite: state.core ? (state.vault ? (bindingPreflight?.nextWrite ?? "binding") : "deploy:vault") : "deploy:core", rpcScheduler: RPC_SCHEDULER.snapshot(), explicitAuthorization: `user-authorized-${QUALIFICATION_VERSION}`};
   writeArtifact(RUN_PLAN_FILE, plan);
   console.log(JSON.stringify({[`${QUALIFICATION_VERSION.toUpperCase().replace(/-/g, "_")}_PLAN`]: plan}, null, 2));
   if (process.argv.includes("--preflight-only")) { writeArtifact(RUN_STATUS_FILE, {status: "PREFLIGHT_ONLY", plan, noTransactionSubmitted: true}); return; }
@@ -732,6 +732,14 @@ async function main() {
       saveState(state);
     }
     if (!cachedSourceParity(state.steps["deploy:vault"], vault, VAULT_SHA)) await deployedSourceParity(client, vault, VAULT_SHA, 3, POLL_MS, persistedDeploymentCode(state.steps["deploy:vault"]));
+    if (!schema) {
+      schema = await schemaParity(client, core, vault, persistedDeploymentCode(state.steps["deploy:core"]), persistedDeploymentCode(state.steps["deploy:vault"]));
+      state.observations.schema = schema;
+      saveState(state);
+    }
+    if (!bindingPreflight) {
+      bindingPreflight = await prepareBindingPreflight(abi, client, state, core, vault, CalldataAddress);
+    }
     const bindingNeedsVaultWrite = bindingPreflight?.nextWrite === "vault:bind_core" || Boolean(state.steps["vault:bind_core"]?.tx);
     const bindingNeedsCoreWrite = bindingNeedsVaultWrite || bindingPreflight?.nextWrite === "core:set_vault_address" || Boolean(state.steps["core:set_vault_address"]?.tx);
     if (bindingNeedsVaultWrite) await executeStep({abi, client, account, state, core, vault, label: "vault:bind_core", functionName: "bind_core", args: [], summary: [], precondition: async () => { if (!sameAddress(await read(client, vault, "get_core_address"), core)) throw new Error("Vault Core constructor binding changed"); }, readback: async () => read(client, vault, "get_core_address"), expectedState: async () => { if (!sameAddress(await read(client, vault, "get_core_address"), core)) throw new Error("Vault Core binding was not finalized"); return {core}; }});
