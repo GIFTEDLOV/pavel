@@ -12,15 +12,8 @@ const SIGNER = "0xcb5a845638cbc1f95d7f8343278685682c3ba13f";
 const CORE = "0x0a6762c46F664751ee5a20d2efB94b979FA8a830";
 const VAULT = "0x3737D9cD645cc6e8036D6775A8264aAa6422f9df";
 const TXS: Record<string, string> = {
-  "deploy:core": "0x27cc8e1945dff3fd1af97c6e258c9a5c88d98b77cb03a0e71c1b2d47fa0013f1",
-  "deploy:vault": "0x20998c5bae3b2f9cae21fd907d9bc085105b17f6b7aa1c392909abed7876c329",
-  "vault:bind_core": "0xcb15ac6abb43d525f4d3199f1ba4c773d2e546f21c8688c9f9c494b142606dc0",
-  "core:set_vault_address": "0x3c1792d09452dbbc7d32f79e0b0118bc5ad3d3e9980b7d78a81870fb910df9b8",
-  "core:register_principal": "0x1f07bb37b4b36e901c09c8c2bfcf6b4580a56a6eb11d2cb90708e54155c6be9d",
-  "core:register_agent": "0xf7e744a74cbb1d794a6f6b972fda78a62ebf3b33b222a3f6a3998c068181180e",
-  "core:create_mandate": "0xbab6dc0f4a6a670521647bfc45eb0da9129cc5b60f43fdde25d091df49c923ea",
-  "core:configure_mandate": "0x870e9cda0c35d4f873ff498bed2574b44a55409af305dffa54ba71fc1b848a3e",
-  "core:seal_mandate": "0x601d191e982c33aa2fc9200eb5a7002f567d80267ea52dbf1f59c75ed01b0866",
+  "core:configure_mandate:recovery": "0xf9801c9a80a2948ac08dfb30908660a285dee0aafdf90bc59dd69fec1eaca180",
+  "core:seal_mandate:recovery": "0xe66187c19131a72cd21db6ec1410d130fb576f7a4206d21af817c5aa6b58aca2",
 };
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -87,6 +80,9 @@ async function main() {
   for (let i = 0; i < historyLength; i += 1) history.push(JSON.parse(String(await read(CORE, "get_history_item", [BigInt(i)]))));
   const accounting = JSON.parse(String(await read(VAULT, "get_global_accounting")));
   const latestNonce = await serialized(() => client.getCurrentNonce({address: SIGNER}));
+  const policyFields = ["title", "purpose", "constitution", "permitted_activity", "forbidden_activity", "maximum_single_transaction", "epoch_budget", "epoch_duration_seconds", "total_budget", "challenge_window_seconds", "evidence_policy", "authority_constraints", "fulfillment_policy", "recovery_policy", "allow_prior_reservations"];
+  const policyConfiguration = Object.fromEntries(policyFields.map((field) => [field, mandate[field]]));
+  const failedSealStateMutation = mandate.status === "DRAFT" && mandate.sealed_at === "" && mandate.definition_hash === "" ? "NONE_ROLLED_BACK" : "MUTATION_DETECTED";
   const result = {
     network: "studionet", rpc: RPC, chainId: CHAIN_ID, generatedAt: new Date().toISOString(),
     addresses: {core: CORE, vault: VAULT},
@@ -100,15 +96,17 @@ async function main() {
       coreVault,
       bindingNormalized: sameAddress(vaultCore, CORE) && sameAddress(coreVault, VAULT),
       history,
-      globalAccounting: accounting,
-      failedSealStateMutation: mandate.status === "DRAFT" && mandate.definition_hash === "" ? "NONE_ROLLED_BACK" : "UNPROVEN",
+       globalAccounting: accounting,
+       policyConfiguration,
+       failedSealStateMutation,
+       failedSealStateReadback: {mandateId: mandate.mandate_id, status: mandate.status, sealed: mandate.status === "SEALED", definitionHash: mandate.definition_hash ?? "", sealedAt: mandate.sealed_at ?? "", validFrom: mandate.valid_from, expiresAt: mandate.expires_at},
     },
     latestNonce: safe(latestNonce),
   };
   write("seal-failure-reconciliation.json", result);
   console.log(JSON.stringify({
     statuses: Object.fromEntries(Object.entries(transactions).map(([label, item]) => [label, {status: item.status, execution: item.execution, nonce: item.nonce}])),
-    mandate: {count, status: mandate.status, validFrom: mandate.valid_from, expiresAt: mandate.expires_at, sealed: mandate.status === "SEALED", failedSealStateMutation: result.state.failedSealStateMutation},
+     mandate: {count, status: mandate.status, validFrom: mandate.valid_from, expiresAt: mandate.expires_at, sealed: mandate.status === "SEALED", failedSealStateMutation: result.state.failedSealStateMutation, policyConfiguration: result.state.policyConfiguration},
     binding: {vaultCore, coreVault, normalized: result.state.bindingNormalized},
     latestNonce: safe(latestNonce),
   }, null, 2));

@@ -1,5 +1,5 @@
 import {createHash} from "node:crypto";
-import {existsSync, mkdirSync, readFileSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync} from "node:fs";
 import path from "node:path";
 import {fileURLToPath} from "node:url";
 import {
@@ -29,10 +29,25 @@ const RUN_PREFIX = QUALIFICATION_VERSION.replace(/[^a-z0-9]+/gi, "-");
 const RUN_STATUS_FILE = `${RUN_PREFIX}-run-status.json`;
 const RUN_PLAN_FILE = `${RUN_PREFIX}-run-plan.json`;
 const RUN_SUMMARY_FILE = `${RUN_PREFIX}-run-summary.json`;
+const RPC_CAPABILITY_CACHE_FILE = path.join(ARTIFACT_DIR, "rpc-capability-cache.json");
+const MINIMUM_SEAL_SUBMISSION_MARGIN_SECONDS = 90;
 
 type Fixture = Record<string, any>;
 type Step = {label: string; tx: string; status: string; execution?: string; outcome?: string; readback?: any; error?: string};
-type State = {network: string; rpc: string; chainId: number; signer: string; core?: string; vault?: string; steps: Record<string, Step>; observations: Record<string, any>};
+type State = {
+  network: string;
+  rpc: string;
+  chainId: number;
+  signer: string;
+  core?: string;
+  vault?: string;
+  steps: Record<string, Step>;
+  completedSteps: Record<string, Step>;
+  failedAttempts: Step[];
+  submittedTransactions: Step[];
+  observations: Record<string, any>;
+};
+type RpcCapabilityCache = {network: string; unsupported: Record<string, {error: string; recordedAt: string}>};
 
 function jsonSafe(value: any): any {
   if (typeof value === "bigint") return value.toString();
@@ -49,6 +64,54 @@ function jsonSafe(value: any): any {
 function writeArtifact(name: string, value: any) {
   mkdirSync(ARTIFACT_DIR, {recursive: true});
   writeFileSync(path.join(ARTIFACT_DIR, name), JSON.stringify(jsonSafe(value), null, 2) + "\n");
+}
+
+function readRpcCapabilityCache(): RpcCapabilityCache {
+  const cache: RpcCapabilityCache = {network: "studionet", unsupported: {}};
+  if (existsSync(RPC_CAPABILITY_CACHE_FILE)) {
+    try {
+      const persisted = JSON.parse(readFileSync(RPC_CAPABILITY_CACHE_FILE, "utf8"));
+      if (persisted?.network === "studionet" && persisted?.unsupported && typeof persisted.unsupported === "object") Object.assign(cache.unsupported, persisted.unsupported);
+    } catch { /* a corrupt diagnostic cache must not affect lifecycle state */ }
+  }
+  // Existing execution diagnostics are also checkpoint evidence. Import them once so a
+  // restart never probes the same unsupported Studionet RPC methods again.
+  try {
+    for (const name of readdirSync(ARTIFACT_DIR)) {
+      if (!name.startsWith("execution-error-") || !name.endsWith(".json")) continue;
+      const diagnostic = JSON.parse(readFileSync(path.join(ARTIFACT_DIR, name), "utf8"));
+      const surfaces = diagnostic?.traceSurfaces ?? {};
+      const mappings: Record<string, string> = {
+        gen_getTransactionReceipt: "gen_getTransactionReceipt",
+        clientDebugTraceTransaction: "gen_dbg_traceTransaction",
+        debugTraceTransaction: "debug_traceTransaction",
+      };
+      for (const [surface, method] of Object.entries(mappings)) {
+        const observation = surfaces[surface];
+        if (observation?.supported === false && /method not found|does not exist|not available/i.test(String(observation.error ?? ""))) {
+          cache.unsupported[method] ??= {error: String(observation.error), recordedAt: new Date().toISOString()};
+        }
+      }
+    }
+  } catch { /* diagnostic history is optional */ }
+  mkdirSync(ARTIFACT_DIR, {recursive: true});
+  writeFileSync(RPC_CAPABILITY_CACHE_FILE, JSON.stringify(jsonSafe(cache), null, 2) + "\n");
+  return cache;
+}
+
+const RPC_CAPABILITY_CACHE = readRpcCapabilityCache();
+const UNSUPPORTED_READ_METHODS = new Set(Object.keys(RPC_CAPABILITY_CACHE.unsupported));
+
+export function cacheUnsupportedRpcCapability(method: string, error: any) {
+  const message = String(error?.message ?? error);
+  UNSUPPORTED_READ_METHODS.add(method);
+  RPC_CAPABILITY_CACHE.unsupported[method] = {error: message, recordedAt: new Date().toISOString()};
+  writeArtifact(path.basename(RPC_CAPABILITY_CACHE_FILE), RPC_CAPABILITY_CACHE);
+}
+
+export function rpcCapabilityStatus(method: string) {
+  if (!UNSUPPORTED_READ_METHODS.has(method)) return {supported: "UNKNOWN"};
+  return {supported: false, cachedUnsupported: true, error: RPC_CAPABILITY_CACHE.unsupported[method]?.error ?? "cached Method not found"};
 }
 
 function rateLimitError(error: any) {
@@ -114,7 +177,6 @@ export class QualificationRpcScheduler {
 }
 
 const RPC_SCHEDULER = new QualificationRpcScheduler();
-const UNSUPPORTED_READ_METHODS = new Set<string>();
 
 function readFixture(): Fixture { return JSON.parse(readFileSync(FIXTURE_PATH, "utf8")); }
 function nowSeconds() { return Math.floor(Date.now() / 1000); }
@@ -147,14 +209,47 @@ function asRecord(value: any): Record<string, any> {
   return value && typeof value === "object" ? value : {};
 }
 function loadState(): State {
-  if (!existsSync(STATE_PATH)) return {network: "studionet", rpc: RPC, chainId: CHAIN_ID, signer: EXPECTED_SIGNER, steps: {}, observations: {}};
+  if (!existsSync(STATE_PATH)) return {network: "studionet", rpc: RPC, chainId: CHAIN_ID, signer: EXPECTED_SIGNER, steps: {}, completedSteps: {}, failedAttempts: [], submittedTransactions: [], observations: {}};
   const state = JSON.parse(readFileSync(STATE_PATH, "utf8"));
   state.steps ??= {};
+  state.completedSteps ??= {};
+  state.failedAttempts ??= [];
+  state.submittedTransactions ??= [];
   state.observations ??= {};
   if (state.signer !== EXPECTED_SIGNER || state.rpc !== RPC || state.chainId !== CHAIN_ID) throw new Error(`${QUALIFICATION_VERSION} checkpoint network or signer mismatch`);
+  normalizeCheckpointSemantics(state);
   return state;
 }
-function saveState(state: State) { writeArtifact(path.basename(STATE_PATH), state); }
+function normalizeCheckpointSemantics(state: State) {
+  for (const [label, step] of Object.entries(state.steps)) {
+    if (step?.tx && !state.submittedTransactions.some((item: Step) => item.tx === step.tx)) state.submittedTransactions.push({...step});
+    if (step?.status === "COMPLETE") state.completedSteps[label] = {...step};
+    if (step?.status === "ERROR") {
+      delete state.completedSteps[label];
+      if (step.tx && !state.failedAttempts.some((item: Step) => item.tx === step.tx)) state.failedAttempts.push({...step});
+    }
+  }
+  for (const label of Object.keys(state.completedSteps)) if (state.steps[label]?.status !== "COMPLETE") delete state.completedSteps[label];
+}
+function recordSubmitted(state: State, step: Step) {
+  state.submittedTransactions = state.submittedTransactions.filter((item: Step) => item.tx !== step.tx);
+  state.submittedTransactions.push({...step});
+}
+function recordFailed(state: State, step: Step) {
+  delete state.completedSteps[step.label];
+  state.failedAttempts = state.failedAttempts.filter((item: Step) => item.tx !== step.tx);
+  state.failedAttempts.push({...step});
+}
+function recordCompleted(state: State, step: Step) {
+  state.completedSteps[step.label] = {...step};
+}
+export function checkpointHasCompletedSuccess(state: any, label: string) {
+  return state?.completedSteps?.[label]?.status === "COMPLETE" && state?.steps?.[label]?.status === "COMPLETE";
+}
+export function checkpointHasFailedAttempt(state: any, label: string) {
+  return Array.isArray(state?.failedAttempts) && state.failedAttempts.some((attempt: Step) => attempt.label === label && attempt.status === "ERROR");
+}
+function saveState(state: State) { normalizeCheckpointSemantics(state); writeArtifact(path.basename(STATE_PATH), state); }
 function appendTransaction(entry: Record<string, any>) {
   const file = TRANSACTION_LEDGER_PATH;
   let doc: any = {network: "studionet", rpc: RPC, chainId: CHAIN_ID, transactions: []};
@@ -243,38 +338,56 @@ function assertIntent(intent: Record<string, any>, fixture: Fixture) {
   if (asText(intent.intent_fingerprint) === "") throw new Error("Intent fingerprint is missing");
 }
 
-async function materializeJustInTimeValidity(client: any, state: State, fixture: Fixture, reason: string) {
-  const candidates = ["core:seal_mandate", "core:configure_mandate", "core:create_mandate", "core:register_agent"];
+function finalizedMonitoringTimestamp(receipt: any) {
+  const value = Number(receipt?.current_monitoring?.FINALIZED ?? receipt?.currentMonitoring?.FINALIZED ?? 0);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+}
+
+async function readChainTimeReference(client: any, state: State, preferredLabel = "") {
+  const candidates = [preferredLabel, "core:seal_mandate:recovery-2", "core:seal_mandate:recovery", "core:configure_mandate:recovery", "core:seal_mandate", "core:configure_mandate", "core:create_mandate", "core:register_agent"].filter(Boolean);
   const sourceLabel = candidates.find((label) => state.steps[label]?.tx) ?? "";
   const sourceTx = sourceLabel ? state.steps[sourceLabel].tx : "";
-  let sourceReceipt: any = null;
-  if (sourceTx) sourceReceipt = await RPC_SCHEDULER.enqueue(`jit-chain-time:${sourceTx}`, () => client.getTransaction({hash: sourceTx}), true);
-  const observedChainTimestamp = Number(sourceReceipt?.current_timestamp ?? sourceReceipt?.created_timestamp ?? 0);
-  if (!Number.isFinite(observedChainTimestamp) || observedChainTimestamp <= 0) throw new Error("Unable to obtain trustworthy finalized chain time for JIT Mandate validity");
-  const observedCreatedTimestamp = Number(sourceReceipt?.created_timestamp ?? observedChainTimestamp);
-  const leaderReceipts = Array.isArray(sourceReceipt?.consensus_data?.leader_receipt) ? sourceReceipt.consensus_data.leader_receipt : Array.isArray(sourceReceipt?.leader_receipt) ? sourceReceipt.leader_receipt : [];
+  if (!sourceTx) throw new Error("Unable to obtain trustworthy finalized chain time: no finalized reference transaction is checkpointed");
+  const receipt = await RPC_SCHEDULER.enqueue(`chain-time:${sourceTx}`, () => client.getTransaction({hash: sourceTx}), true);
+  const observedChainTimestamp = Number(receipt?.current_timestamp ?? finalizedMonitoringTimestamp(receipt) ?? 0);
+  if (!Number.isFinite(observedChainTimestamp) || observedChainTimestamp <= 0) throw new Error("Unable to obtain trustworthy finalized chain time reference");
+  const observedCreatedTimestamp = Number(receipt?.created_timestamp ?? observedChainTimestamp);
+  const finalizedTimestamp = finalizedMonitoringTimestamp(receipt);
+  const leaderReceipts = Array.isArray(receipt?.consensus_data?.leader_receipt) ? receipt.consensus_data.leader_receipt : Array.isArray(receipt?.leader_receipt) ? receipt.leader_receipt : [];
   const processingMs = Number(leaderReceipts.find((item: any) => Number(item?.processing_time) > 0)?.processing_time ?? 0);
-  const observedLatency = processingMs > 0 ? Math.ceil(processingMs / 1000) : Math.min(120, Math.max(0, observedChainTimestamp - observedCreatedTimestamp));
-  const derived = deriveJustInTimeValidity(Math.max(observedChainTimestamp, Math.floor(Date.now() / 1000)), observedLatency, Number(fixture.validFrom), Number(fixture.expiresAt));
-  const wallObservedAt = Math.floor(Date.now() / 1000);
-  const chainNowEstimate = derived.chainNow;
-  const safetyMargin = derived.safetyMargin;
-  const horizon = derived.horizon;
-  const correctedValidFrom = derived.validFrom;
-  const correctedExpiresAt = derived.expiresAt;
+  const consensusLatency = finalizedTimestamp > 0 && observedCreatedTimestamp > 0 ? Math.max(0, finalizedTimestamp - observedCreatedTimestamp) : 0;
+  const processingLatency = processingMs > 0 ? Math.ceil(processingMs / 1000) : 0;
+  const observedLatency = Math.max(consensusLatency, processingLatency);
+  return {sourceLabel, sourceTx, receipt, chainNow: Math.floor(observedChainTimestamp), observedCreatedTimestamp, finalizedTimestamp, processingMs, observedLatency, latencySource: consensusLatency > 0 ? "finalized_monitoring_minus_created_timestamp" : processingLatency > 0 ? "leader_receipt.processing_time" : "unavailable"};
+}
+
+async function materializeJustInTimeValidity(client: any, state: State, fixture: Fixture, reason: string, preferredLabel = "") {
+  const reference = await readChainTimeReference(client, state, preferredLabel);
+  const derived = deriveJustInTimeValidity(reference.chainNow, reference.observedLatency, Number(fixture.validFrom), Number(fixture.expiresAt));
+  const priorPath = path.join(ARTIFACT_DIR, "fixture-amendment.json");
+  let prior: any = {};
+  if (existsSync(priorPath)) {
+    try { prior = JSON.parse(readFileSync(priorPath, "utf8")); } catch { /* a missing amendment history is recoverable */ }
+  }
+  const history: any[] = Array.isArray(prior.history) ? prior.history : [];
+  if (prior.original && !history.some((item) => item.validFrom === prior.original.validFrom && item.expiresAt === prior.original.expiresAt)) history.unshift({revision: "historical", reason: prior.reason ?? "PREVIOUS_JIT_MATERIALIZATION", validFrom: prior.original.validFrom, expiresAt: prior.original.expiresAt});
+  if (prior.corrected && !history.some((item) => item.validFrom === prior.corrected.validFrom && item.expiresAt === prior.corrected.expiresAt)) history.push({revision: "historical", reason: prior.reason ?? "PREVIOUS_JIT_MATERIALIZATION", validFrom: prior.corrected.validFrom, expiresAt: prior.corrected.expiresAt});
+  const revision = {revision: reason, validFrom: derived.validFrom, expiresAt: derived.expiresAt, sourceTx: reference.sourceTx, materializedAt: new Date().toISOString()};
+  if (!history.some((item) => item.validFrom === revision.validFrom && item.expiresAt === revision.expiresAt)) history.push(revision);
   const amendment = {
     qualificationVersion: QUALIFICATION_VERSION,
     status: "MATERIALIZED",
     reason,
     original: {validFrom: Number(fixture.validFrom), expiresAt: Number(fixture.expiresAt)},
-    corrected: {validFrom: correctedValidFrom, expiresAt: correctedExpiresAt},
-    chainTimeEvidence: {sourceLabel, sourceTx, observedChainTimestamp, observedCreatedTimestamp, currentTimestampAgeSeconds: Math.max(0, observedChainTimestamp - observedCreatedTimestamp), processingMs, observedLatency, latencySource: processingMs > 0 ? "leader_receipt.processing_time" : "bounded_created_timestamp_delta", wallObservedAt, chainNowEstimate},
-    timingSafetyMarginSeconds: safetyMargin,
-    horizonSeconds: horizon,
+    corrected: {validFrom: derived.validFrom, expiresAt: derived.expiresAt},
+    history,
+    chainTimeEvidence: {...reference, wallObservedAt: Math.floor(Date.now() / 1000)},
+    timingSafetyMarginSeconds: derived.safetyMargin,
+    horizonSeconds: derived.horizon,
     materializedAt: new Date().toISOString(),
   };
   writeArtifact("fixture-amendment.json", amendment);
-  return {...fixture, validFrom: correctedValidFrom, expiresAt: correctedExpiresAt};
+  return {...fixture, validFrom: derived.validFrom, expiresAt: derived.expiresAt};
 }
 
 export function deriveJustInTimeValidity(chainNow: number, observedLatency: number, originalValidFrom: number, originalExpiresAt: number) {
@@ -284,19 +397,43 @@ export function deriveJustInTimeValidity(chainNow: number, observedLatency: numb
   return {chainNow: Math.floor(chainNow), observedLatency, safetyMargin, horizon, validFrom, expiresAt: validFrom + horizon};
 }
 
-async function waitForMandateActivation(client: any, state: State, validFrom: number) {
+export function minimumSafeSealMargin(observedLatency: number) {
+  return Math.max(MINIMUM_SEAL_SUBMISSION_MARGIN_SECONDS, Math.min(300, Math.ceil(Math.max(0, observedLatency)) + 60));
+}
+
+export function CAN_SEAL(mandate: Record<string, any>, currentChainTime: number) {
+  return Number(currentChainTime) < Number(mandate?.valid_from ?? 0);
+}
+
+export function CAN_USE_ACTIVE_MANDATE(mandate: Record<string, any>, currentChainTime: number) {
+  const now = Number(currentChainTime);
+  return now >= Number(mandate?.valid_from ?? 0) && now < Number(mandate?.expires_at ?? 0);
+}
+
+export function assertSealWindowOpen(mandate: Record<string, any>, currentChainTime: number, minimumRemainingSeconds = 0) {
+  if (!CAN_SEAL(mandate, currentChainTime)) throw new Error(`Seal window is closed: chain_now=${currentChainTime} valid_from=${mandate?.valid_from}`);
+  const remaining = Number(mandate.valid_from) - Number(currentChainTime);
+  if (remaining < minimumRemainingSeconds) throw new Error(`Seal window safety margin is exhausted: remaining=${remaining}s minimum=${minimumRemainingSeconds}s`);
+  return {chainNow: Number(currentChainTime), validFrom: Number(mandate.valid_from), remainingSeconds: remaining};
+}
+
+async function waitForMandateActivation(client: any, state: State, mandate: Record<string, any>, sealLabel = "") {
   if (QUALIFICATION_VERSION !== "qualification-v4") return;
-  const label = state.steps["core:seal_mandate:recovery"]?.tx ? "core:seal_mandate:recovery" : "core:seal_mandate";
+  const label = sealLabel || Object.keys(state.steps).reverse().find((candidate) => candidate.startsWith("core:seal_mandate") && state.steps[candidate]?.tx) || "core:seal_mandate";
   const tx = state.steps[label]?.tx;
-  const receipt = tx ? await RPC_SCHEDULER.enqueue(`activation-time:${tx}`, () => client.getTransaction({hash: tx}), true) : null;
-  const chainAtObservation = Number(receipt?.current_timestamp ?? receipt?.created_timestamp ?? 0);
-  const wallAtObservation = Math.floor(Date.now() / 1000);
-  if (!Number.isFinite(chainAtObservation) || chainAtObservation <= 0) throw new Error("Unable to establish finalized chain time for Mandate activation wait");
-  while (chainAtObservation + Math.max(0, Math.floor(Date.now() / 1000) - wallAtObservation) < validFrom) {
-    writeArtifact("mandate-activation-wait.json", {status: "WAITING", validFrom, chainAtObservation, wallAtObservation, observedEstimate: chainAtObservation + Math.max(0, Math.floor(Date.now() / 1000) - wallAtObservation)});
+  if (!tx) throw new Error("Cannot wait for mandate activation without a finalized seal transaction");
+  while (true) {
+    const reference = await readChainTimeReference(client, state, label);
+    const chainNow = reference.chainNow;
+    if (CAN_USE_ACTIVE_MANDATE(mandate, chainNow)) {
+      writeArtifact("mandate-activation-wait.json", {status: "ACTIVE", validFrom: mandate.valid_from, expiresAt: mandate.expires_at, chainNow, sourceTx: reference.sourceTx});
+      return;
+    }
+    if (chainNow >= Number(mandate.expires_at)) throw new Error(`Mandate activation wait passed expiration: chain_now=${chainNow} expires_at=${mandate.expires_at}`);
+    writeArtifact("mandate-activation-wait.json", {status: "WAITING", validFrom: mandate.valid_from, expiresAt: mandate.expires_at, chainNow, sourceTx: reference.sourceTx});
+    console.log(`WAITING_FOR_MANDATE_ACTIVATION=${mandate.valid_from}`);
     await sleep(POLL_MS);
   }
-  writeArtifact("mandate-activation-wait.json", {status: "ACTIVE", validFrom, chainAtObservation, wallAtObservation, observedEstimate: chainAtObservation + Math.max(0, Math.floor(Date.now() / 1000) - wallAtObservation)});
 }
 export function inspectResults(receipt: any) {
   const consensusStatus = String(receipt?.statusName ?? receipt?.status ?? "UNKNOWN").toUpperCase();
@@ -324,12 +461,12 @@ export function inspectResults(receipt: any) {
   return {consensusStatus, consensusResult, executionResult: "UNKNOWN", executionResultSource: "unavailable"};
 }
 export async function collectExecutionDiagnostics(client: any, tx: string, receipt: any) {
-  const safeRead = async (label: string, action: () => Promise<any>) => {
-    if (UNSUPPORTED_READ_METHODS.has(label)) return {supported: false, cachedUnsupported: true, error: "cached Method not found"};
-    try { return {supported: true, value: await RPC_SCHEDULER.enqueue(`error:${tx}:${label}`, action, true)}; }
+  const safeRead = async (method: string, action: () => Promise<any>) => {
+    if (UNSUPPORTED_READ_METHODS.has(method)) return rpcCapabilityStatus(method);
+    try { return {supported: true, value: await RPC_SCHEDULER.enqueue(`error:${tx}:${method}`, action, true)}; }
     catch (error: any) {
       const message = String(error?.message ?? error);
-      if (/method not found|unsupported|does not exist/i.test(message)) UNSUPPORTED_READ_METHODS.add(label);
+      if (/method not found|unsupported|does not exist|not available/i.test(message)) cacheUnsupportedRpcCapability(method, error);
       return {supported: false, error: message};
     }
   };
@@ -347,11 +484,13 @@ export async function collectExecutionDiagnostics(client: any, tx: string, recei
     exceptionMessage: leaderPayload,
     leader: leader.map((item: any) => ({result: item?.result, genvmResult: item?.genvm_result, executionStats: item?.execution_stats, calldata: item?.calldata})),
     validators: validators.map((item: any) => ({vote: item?.vote, result: item?.result, genvmResult: item?.genvm_result, executionStats: item?.execution_stats, address: item?.node_config?.address})),
+    // The receipt already contains the working leader/validator execution surfaces.
+    // Optional diagnostic RPCs are probed at most once and are checkpoint-cached.
+    receiptSurfaces: {leader_receipt: leader, validators},
     traceSurfaces: {
       gen_getTransactionReceipt: await safeRead("gen_getTransactionReceipt", () => client.request({method: "gen_getTransactionReceipt", params: [tx]})),
-      clientGetTransactionReceipt: await safeRead("clientGetTransactionReceipt", () => client.getTransactionReceipt({hash: tx})),
-      clientDebugTraceTransaction: await safeRead("clientDebugTraceTransaction", () => client.debugTraceTransaction({hash: tx, round: 0})),
-      debugTraceTransaction: await safeRead("debugTraceTransaction", () => client.request({method: "debug_traceTransaction", params: [tx, {round: 0}]})),
+      gen_dbg_traceTransaction: await safeRead("gen_dbg_traceTransaction", () => client.debugTraceTransaction({hash: tx, round: 0})),
+      debug_traceTransaction: await safeRead("debug_traceTransaction", () => client.request({method: "debug_traceTransaction", params: [tx, {round: 0}]})),
     },
   };
   writeArtifact(`execution-error-${tx.slice(2, 14)}.json`, diagnostic);
@@ -391,29 +530,53 @@ async function reconcile(client: any, tx: string, account: any, expectedState?: 
   throw new Error(`Timed out reconciling ${tx}; no replacement was submitted`);
 }
 function targetFor(label: string, core: string, vault: string) { return label.startsWith("vault:") ? vault : core; }
+async function reconcileExistingCompletedReadOnly(client: any, step: Step, expectedState?: () => Promise<any>) {
+  if (!step?.tx) throw new Error(`Completed checkpoint ${step?.label ?? "unknown"} has no transaction hash`);
+  const receipt = await RPC_SCHEDULER.enqueue(`resume:${step.tx}:status`, () => client.getTransaction({hash: step.tx}), true);
+  const status = String(receipt?.statusName ?? receipt?.status ?? "");
+  if (status !== "FINALIZED") throw new Error(`Completed checkpoint ${step.label} is not finalized: ${status || "UNKNOWN"}`);
+  const observation = inspectResults(receipt);
+  if (observation.executionResult === "ERROR") throw new Error(`Completed checkpoint ${step.label} reconciled to execution ERROR`);
+  if (observation.executionResult === "UNKNOWN" && expectedState) await expectedState();
+  return {receipt, ...observation};
+}
+
 async function executeStep(config: {abi: any; client: any; account: any; state: State; core: string; vault: string; label: string; functionName: string; args: any[]; summary: any[]; precondition: () => Promise<void>; readback: () => Promise<any>; expectedState?: () => Promise<any>; value?: bigint}) {
   const {abi, client, account, state, core, vault, label, functionName, args, summary, precondition, readback, expectedState, value = 0n} = config;
+  normalizeCheckpointSemantics(state);
   const existing = state.steps[label];
-  if (existing?.status === "COMPLETE") return {tx: existing.tx, readback: await readback(), resumed: true};
+  if (state.completedSteps[label]?.status === "COMPLETE") {
+    await reconcileExistingCompletedReadOnly(client, state.completedSteps[label], expectedState);
+    return {tx: state.completedSteps[label].tx, readback: await readback(), resumed: true};
+  }
   let tx = existing?.tx;
   let proof: any;
   if (tx) {
-    if (existing.status === "ERROR") throw new Error(`Checkpoint contains explicit failed transaction for ${label}: ${existing.error ?? "unknown"}`);
+    if (existing.status === "ERROR" || state.failedAttempts.some((attempt) => attempt.tx === tx)) throw new Error(`Checkpoint contains explicit failed transaction for ${label}: ${existing.error ?? "unknown"}`);
   } else {
     proof = calldataProof(abi, functionName, args);
     await precondition();
     tx = String(await RPC_SCHEDULER.enqueue(`write:${label}`, () => client.writeContract({address: targetFor(label, core, vault), functionName, args, value, account}), false));
     const entry: Step = {label, tx, status: "SUBMITTED"};
     state.steps[label] = entry;
+    recordSubmitted(state, entry);
     saveState(state);
     appendTransaction({kind: label, tx, method: functionName, args: summary, calldataProof: proof, value: value.toString(), status: "SUBMITTED", execution: "PENDING", broadcastedAt: new Date().toISOString()});
     console.log(`TX_SUBMITTED=${label} ${tx}`);
   }
   let result: any;
   try { result = await reconcile(client, tx, account, expectedState); }
-  catch (error: any) { state.steps[label] = {...state.steps[label], label, tx, status: "ERROR", error: String(error?.message ?? error)}; saveState(state); appendTransaction({kind: label, tx, status: "ERROR", executionResult: "ERROR", error: String(error?.message ?? error)}); writeArtifact("last-lifecycle-step.json", state.steps[label]); throw error; }
+  catch (error: any) {
+    state.steps[label] = {...state.steps[label], label, tx, status: "ERROR", error: String(error?.message ?? error)};
+    recordFailed(state, state.steps[label]);
+    saveState(state);
+    appendTransaction({kind: label, tx, status: "ERROR", executionResult: "ERROR", error: String(error?.message ?? error)});
+    writeArtifact("last-lifecycle-step.json", state.steps[label]);
+    throw error;
+  }
   const rb = await readback();
   state.steps[label] = {...state.steps[label], label, tx, status: "COMPLETE", execution: result.executionResult, executionResult: result.executionResult, outcome: result.outcome, lifecycle: result.lifecycle, readback: rb};
+  recordCompleted(state, state.steps[label]);
   saveState(state);
   appendTransaction({kind: label, tx, method: functionName, args: summary, status: result.receipt.statusName, lifecycle: result.lifecycle, consensusStatus: result.consensusStatus, consensusResult: result.consensusResult, executionResult: result.executionResult, executionResultSource: result.executionResultSource, reconciliationOutcome: result.outcome, receipt: result.receipt, readback: rb});
   writeArtifact("last-lifecycle-step.json", state.steps[label]);
@@ -597,6 +760,7 @@ async function executeDeployment(config: {client: any; account: any; state: Stat
     if (sha256File(codePath) !== expectedHash) throw new Error(`${label} source hash changed after freeze`);
     tx = String(await RPC_SCHEDULER.enqueue(`write:${label}`, () => client.deployContract({code, args: constructorArgs, account}), false));
     state.steps[label] = {label, tx, status: "SUBMITTED"};
+    recordSubmitted(state, state.steps[label]);
     saveState(state);
     appendTransaction({kind: label, tx, method: "deployContract", args: summary, status: "SUBMITTED", execution: "PENDING", broadcastedAt: new Date().toISOString()});
     console.log(`TX_SUBMITTED=${label} ${tx}`);
@@ -605,6 +769,7 @@ async function executeDeployment(config: {client: any; account: any; state: Stat
   try { result = await reconcile(client, tx, account); }
   catch (error: any) {
     state.steps[label] = {...state.steps[label], label, tx, status: "ERROR", error: String(error?.message ?? error)};
+    recordFailed(state, state.steps[label]);
     saveState(state);
     writeArtifact("last-lifecycle-step.json", state.steps[label]);
     throw error;
@@ -617,6 +782,7 @@ async function executeDeployment(config: {client: any; account: any; state: Stat
   const parity = await deployedSourceParity(client, deployedAddress, expectedHash, 12, POLL_MS, contractCodeFromFinalizedReceipt(result.receipt));
   const readback = {address: deployedAddress, sourceParity: parity};
   state.steps[label] = {...state.steps[label], label, tx, status: "COMPLETE", execution: result.executionResult, executionResult: result.executionResult, outcome: result.outcome, readback, consensusStatus: result.consensusStatus, consensusResult: result.consensusResult, executionResultSource: result.executionResultSource, lifecycle: result.lifecycle};
+  recordCompleted(state, state.steps[label]);
   saveState(state);
   appendTransaction({kind: label, tx, method: "deployContract", args: summary, status: result.receipt.statusName, lifecycle: result.lifecycle, consensusStatus: result.consensusStatus, consensusResult: result.consensusResult, executionResult: result.executionResult, executionResultSource: result.executionResultSource, reconciliationOutcome: result.outcome, authoritativeAddress: deployedAddress, receipt: result.receipt, readback});
   writeArtifact(`${label.replace(/[^a-z0-9]+/gi, "-")}.json`, {tx, receipt: result.receipt, readback});
@@ -704,6 +870,23 @@ async function simulateUnassessed(client: any, vault: string, account: any, inte
   throw new Error("Unassessed reservation simulation unexpectedly succeeded");
 }
 
+function hasHistoricalSealFailure(state: State) {
+  return state.failedAttempts.some((attempt) => attempt.label.startsWith("core:seal_mandate") || attempt.label === "core:seal_mandate") || Object.entries(state.steps).some(([label, step]) => label.startsWith("core:seal_mandate") && step.status === "ERROR");
+}
+
+function nextRecoveryLabels(state: State, startAttempt = 2) {
+  for (let attempt = startAttempt; attempt <= 20; attempt += 1) {
+    const configureLabel = `core:configure_mandate:recovery-${attempt}`;
+    const sealLabel = `core:seal_mandate:recovery-${attempt}`;
+    if (!state.steps[configureLabel] || state.steps[sealLabel]?.status !== "ERROR") return {configureLabel, sealLabel};
+  }
+  throw new Error("Recovery checkpoint has exhausted its bounded JIT reconfiguration attempts");
+}
+
+function mandateConfigurationArgs(fixture: Fixture) {
+  return ["M-1", fixture.title, fixture.purpose, fixture.constitution, fixture.permittedActivity, fixture.forbiddenActivity, BigInt(fixture.maximumSingleTransaction), BigInt(fixture.epochBudget), BigInt(fixture.epochDurationSeconds), BigInt(fixture.totalBudget), BigInt(fixture.validFrom), BigInt(fixture.expiresAt), BigInt(fixture.challengeWindowSeconds), fixture.evidencePolicy, fixture.deployedAuthorityConstraints, fixture.fulfillmentPolicy, fixture.recoveryPolicy, false];
+}
+
 async function main() {
   const deps = await loadPinnedDependencies();
   const {abi, chains, createAccount, createClient, CalldataAddress, Wallet, prompt} = deps;
@@ -714,11 +897,19 @@ async function main() {
   const state = loadState();
   const readClient = createClient({chain: chains.studionet, endpoint: RPC, account: EXPECTED_SIGNER});
   if (await RPC_SCHEDULER.enqueue("chain-id", () => readClient.getChainId(), true) !== CHAIN_ID) throw new Error("RPC is not Studionet 61999");
-  if (QUALIFICATION_VERSION === "qualification-v4" && state.core && state.steps["core:seal_mandate"]?.status === "ERROR") {
+  let recoveryPlan: {configureLabel: string; sealLabel: string} | null = null;
+  if (QUALIFICATION_VERSION === "qualification-v4" && state.core && hasHistoricalSealFailure(state)) {
     const currentMandate = asRecord(await read(readClient, state.core, "get_mandate", ["M-1"]));
-    const recoveryConfigure = state.steps["core:configure_mandate:recovery"];
-    if (currentMandate.status === "DRAFT" && !recoveryConfigure) fixture = await materializeJustInTimeValidity(readClient, state, fixture, "FAILED_SEAL_VALID_FROM_PAST");
-    else if (recoveryConfigure && currentMandate.valid_from && currentMandate.expires_at) fixture = {...fixture, validFrom: Number(currentMandate.valid_from), expiresAt: Number(currentMandate.expires_at)};
+    if (currentMandate.status === "DRAFT" && asText(currentMandate.title) !== "") {
+      recoveryPlan = nextRecoveryLabels(state);
+      const configuredRecovery = state.steps[recoveryPlan.configureLabel];
+      if (configuredRecovery?.tx) {
+        if (configuredRecovery.status === "COMPLETE") await reconcileExistingCompletedReadOnly(readClient, configuredRecovery, async () => read(readClient, state.core!, "get_mandate", ["M-1"]));
+        if (currentMandate.valid_from && currentMandate.expires_at) fixture = {...fixture, validFrom: Number(currentMandate.valid_from), expiresAt: Number(currentMandate.expires_at)};
+      } else {
+        fixture = await materializeJustInTimeValidity(readClient, state, {...fixture, validFrom: Number(currentMandate.valid_from), expiresAt: Number(currentMandate.expires_at)}, "RECOVERY_2_PREPARE_CONFIGURE", "core:seal_mandate:recovery");
+      }
+    }
   }
   normalizeCompletedDeploymentCheckpoint(state, "deploy:core");
   normalizeCompletedDeploymentCheckpoint(state, "deploy:vault");
@@ -750,7 +941,7 @@ async function main() {
     saveState(state);
     writeArtifact("vault-finalized-source-proof.json", {tx: state.steps["deploy:vault"]?.tx, address: state.vault, status: "FINALIZED", execution: state.steps["deploy:vault"]?.executionResult, consensusResult: state.steps["deploy:vault"]?.consensusResult, sourceParity: vaultProof});
   }
-  if (QUALIFICATION_VERSION === "qualification-v4" && state.core && (state.steps["core:configure_mandate:recovery"]?.status === "COMPLETE" || (state.steps["core:configure_mandate"]?.status === "COMPLETE" && state.steps["core:seal_mandate"]?.status !== "ERROR"))) {
+  if (!recoveryPlan && QUALIFICATION_VERSION === "qualification-v4" && state.core && (state.steps["core:configure_mandate:recovery"]?.status === "COMPLETE" || (state.steps["core:configure_mandate"]?.status === "COMPLETE" && !hasHistoricalSealFailure(state)))) {
     const configuredMandate = asRecord(await read(readClient, state.core, "get_mandate", ["M-1"]));
     if (configuredMandate.valid_from && configuredMandate.expires_at) fixture = {...fixture, validFrom: Number(configuredMandate.valid_from), expiresAt: Number(configuredMandate.expires_at)};
   }
@@ -770,7 +961,7 @@ async function main() {
   try { balanceRead = {supported: true, value: await rawRpc("eth_getBalance", [EXPECTED_SIGNER, "latest"])}; }
   catch (error: any) { balanceRead = {supported: false, error: String(error?.message ?? error)}; }
   writeArtifact("deployment-preflight.json", {status: "READY", firstWrite: "deploy:core", core: {sourceSha256: CORE_SHA, constructorArgs: []}, vault: {sourceSha256: VAULT_SHA, constructorArg: "typed Address(V4 Core authoritative address, resolved after Core finalization)"}, signer: EXPECTED_SIGNER, nonce: String(nonce), balance: balanceRead});
-  const nextUnfinishedWrite = state.steps["core:seal_mandate"]?.status === "ERROR" ? "core:configure_mandate:recovery" : state.core ? (state.vault ? (bindingPreflight?.nextWrite ?? "binding") : "deploy:vault") : "deploy:core";
+  const nextUnfinishedWrite = recoveryPlan?.configureLabel ?? (state.steps["core:seal_mandate"]?.status === "ERROR" ? "core:configure_mandate:recovery-2" : state.core ? (state.vault ? (bindingPreflight?.nextWrite ?? "binding") : "deploy:vault") : "deploy:core");
   const plan = {qualificationVersion: QUALIFICATION_VERSION, network: "studionet", rpc: RPC, chainId: CHAIN_ID, signer: EXPECTED_SIGNER, selectedKeystore: {name: selectedKeystore.name, address: selectedKeystore.address}, sourceHashes: {core: CORE_SHA, vault: VAULT_SHA}, fixture: {validFrom: fixture.validFrom, expiresAt: fixture.expiresAt, amount: "1", authority: fixture.authority}, checkpoint: {core: state.core ?? null, vault: state.vault ?? null, steps: Object.keys(state.steps)}, deployerNonce: String(nonce), nextUnfinishedWrite, rpcScheduler: RPC_SCHEDULER.snapshot(), explicitAuthorization: `user-authorized-${QUALIFICATION_VERSION}`};
   writeArtifact(RUN_PLAN_FILE, plan);
   console.log(JSON.stringify({[`${QUALIFICATION_VERSION.toUpperCase().replace(/-/g, "_")}_PLAN`]: plan}, null, 2));
@@ -841,32 +1032,53 @@ async function main() {
       mandate = asRecord(await read(client, core, "get_mandate", ["M-1"]));
     }
     if (!Object.keys(mandate).length) throw new Error("M-1 was not created");
-    if (QUALIFICATION_VERSION === "qualification-v4" && state.steps["core:seal_mandate"]?.status === "ERROR" && mandate.status === "DRAFT" && asText(mandate.title) !== "") {
-      const args = ["M-1", fixture.title, fixture.purpose, fixture.constitution, fixture.permittedActivity, fixture.forbiddenActivity, BigInt(fixture.maximumSingleTransaction), BigInt(fixture.epochBudget), BigInt(fixture.epochDurationSeconds), BigInt(fixture.totalBudget), BigInt(fixture.validFrom), BigInt(fixture.expiresAt), BigInt(fixture.challengeWindowSeconds), fixture.evidencePolicy, fixture.deployedAuthorityConstraints, fixture.fulfillmentPolicy, fixture.recoveryPolicy, false];
-      await executeStep({abi, client, account, state, core, vault, label: "core:configure_mandate:recovery", functionName: "configure_mandate", args, summary: [{type: "string", value: "M-1"}, {type: "policy", value: `${QUALIFICATION_VERSION}-fixture-amendment`}, {type: "validity", validFrom: fixture.validFrom, expiresAt: fixture.expiresAt}], precondition: async () => { const item = asRecord(await read(client, core, "get_mandate", ["M-1"])); if (item.status !== "DRAFT" || asText(item.title) === "") throw new Error("M-1 recovery reconfiguration precondition failed"); }, readback: async () => read(client, core, "get_mandate", ["M-1"]), expectedState: async () => read(client, core, "get_mandate", ["M-1"]) });
+    if (QUALIFICATION_VERSION === "qualification-v4" && recoveryPlan && mandate.status === "DRAFT" && asText(mandate.title) !== "") {
+      // This is intentionally the last read-only timing calculation before the
+      // configure broadcast. It never waits for valid_from.
+      if (!state.steps[recoveryPlan.configureLabel]?.tx) fixture = await materializeJustInTimeValidity(client, state, {...fixture, validFrom: Number(mandate.valid_from), expiresAt: Number(mandate.expires_at)}, `RECOVERY_${recoveryPlan.configureLabel}_JIT`, "core:seal_mandate:recovery");
+      const args = mandateConfigurationArgs(fixture);
+      await executeStep({abi, client, account, state, core, vault, label: recoveryPlan.configureLabel, functionName: "configure_mandate", args, summary: [{type: "string", value: "M-1"}, {type: "policy", value: `${QUALIFICATION_VERSION}-jit-recovery`}, {type: "validity", validFrom: fixture.validFrom, expiresAt: fixture.expiresAt}], precondition: async () => { const item = asRecord(await read(client, core, "get_mandate", ["M-1"])); if (item.status !== "DRAFT" || asText(item.title) === "") throw new Error("M-1 recovery reconfiguration precondition failed"); }, readback: async () => read(client, core, "get_mandate", ["M-1"]), expectedState: async () => read(client, core, "get_mandate", ["M-1"]) });
       mandate = asRecord(await read(client, core, "get_mandate", ["M-1"]));
     }
     if (mandate.status === "DRAFT" && asText(mandate.title) === "") {
       if (QUALIFICATION_VERSION === "qualification-v4") {
-        const amendmentPath = path.join(ARTIFACT_DIR, "fixture-amendment.json");
-        if (existsSync(amendmentPath)) {
-          const amendment = JSON.parse(readFileSync(amendmentPath, "utf8"));
-          if (amendment.corrected?.validFrom && amendment.corrected?.expiresAt) fixture = {...fixture, validFrom: amendment.corrected.validFrom, expiresAt: amendment.corrected.expiresAt};
-        } else fixture = await materializeJustInTimeValidity(client, state, fixture, "INITIAL_CONFIGURE_JIT_VALIDITY");
+        fixture = await materializeJustInTimeValidity(client, state, fixture, "INITIAL_CONFIGURE_JIT_VALIDITY");
       }
-      const args = ["M-1", fixture.title, fixture.purpose, fixture.constitution, fixture.permittedActivity, fixture.forbiddenActivity, BigInt(fixture.maximumSingleTransaction), BigInt(fixture.epochBudget), BigInt(fixture.epochDurationSeconds), BigInt(fixture.totalBudget), BigInt(fixture.validFrom), BigInt(fixture.expiresAt), BigInt(fixture.challengeWindowSeconds), fixture.evidencePolicy, fixture.deployedAuthorityConstraints, fixture.fulfillmentPolicy, fixture.recoveryPolicy, false];
+      const args = mandateConfigurationArgs(fixture);
       await executeStep({abi, client, account, state, core, vault, label: "core:configure_mandate", functionName: "configure_mandate", args, summary: [{type: "string", value: "M-1"}, {type: "policy", value: `${QUALIFICATION_VERSION}-fixture`}], precondition: async () => { if (asRecord(await read(client, core, "get_mandate", ["M-1"])).status !== "DRAFT") throw new Error("M-1 is not configurable"); }, readback: async () => read(client, core, "get_mandate", ["M-1"]), expectedState: async () => read(client, core, "get_mandate", ["M-1"])});
       mandate = asRecord(await read(client, core, "get_mandate", ["M-1"]));
     }
     assertMandate(mandate, fixture, "DRAFT");
     if (mandate.status === "DRAFT") {
-      while (nowSeconds() < Number(fixture.validFrom)) { console.log(`WAITING_FOR_MANDATE_VALID_FROM=${fixture.validFrom}`); await sleep(POLL_MS); }
-      const sealLabel = state.steps["core:seal_mandate"]?.status === "ERROR" ? "core:seal_mandate:recovery" : "core:seal_mandate";
-      await executeStep({abi, client, account, state, core, vault, label: sealLabel, functionName: "seal_mandate", args: ["M-1"], summary: [{type: "string", value: "M-1"}, {type: "validity", validFrom: fixture.validFrom, expiresAt: fixture.expiresAt}], precondition: async () => { const item = asRecord(await read(client, core, "get_mandate", ["M-1"])); assertMandate(item, fixture, "DRAFT"); }, readback: async () => read(client, core, "get_mandate", ["M-1"]), expectedState: async () => { const item = asRecord(await read(client, core, "get_mandate", ["M-1"])); assertMandate(item, fixture, "SEALED"); return item; }});
+      let configureLabel = recoveryPlan?.configureLabel ?? "core:configure_mandate";
+      let sealLabel = recoveryPlan?.sealLabel ?? "core:seal_mandate";
+      let sealPrepared = false;
+      for (let reconfiguration = 0; reconfiguration < 4 && !sealPrepared; reconfiguration += 1) {
+        const reference = QUALIFICATION_VERSION === "qualification-v4" ? await readChainTimeReference(client, state, configureLabel) : {chainNow: nowSeconds(), observedLatency: 0, sourceTx: state.steps[configureLabel]?.tx ?? ""};
+        const minimumMargin = QUALIFICATION_VERSION === "qualification-v4" ? minimumSafeSealMargin(reference.observedLatency) : 0;
+        try {
+          const sealWindow = assertSealWindowOpen(mandate, reference.chainNow, minimumMargin);
+          writeArtifact("seal-preflight.json", {status: "READY", configureLabel, sealLabel, sourceTx: reference.sourceTx, chainNow: reference.chainNow, validFrom: mandate.valid_from, expiresAt: mandate.expires_at, remainingSeconds: sealWindow.remainingSeconds, minimumSafeSealMargin: minimumMargin, canSeal: CAN_SEAL(mandate, reference.chainNow), canUseActiveMandate: CAN_USE_ACTIVE_MANDATE(mandate, reference.chainNow)});
+          sealPrepared = true;
+        } catch (error: any) {
+          if (QUALIFICATION_VERSION !== "qualification-v4") throw error;
+          const nextAttempt = Number(configureLabel.match(/recovery-(\d+)$/)?.[1] ?? 1) + 1;
+          recoveryPlan = nextRecoveryLabels(state, nextAttempt);
+          configureLabel = recoveryPlan.configureLabel;
+          sealLabel = recoveryPlan.sealLabel;
+          fixture = await materializeJustInTimeValidity(client, state, {...fixture, validFrom: Number(mandate.valid_from), expiresAt: Number(mandate.expires_at)}, `RECOVERY_${nextAttempt}_MARGIN_RECONFIGURE`, configureLabel);
+          const args = mandateConfigurationArgs(fixture);
+          await executeStep({abi, client, account, state, core, vault, label: configureLabel, functionName: "configure_mandate", args, summary: [{type: "string", value: "M-1"}, {type: "policy", value: `${QUALIFICATION_VERSION}-margin-reconfigure`}, {type: "validity", validFrom: fixture.validFrom, expiresAt: fixture.expiresAt}], precondition: async () => { const item = asRecord(await read(client, core, "get_mandate", ["M-1"])); if (item.status !== "DRAFT") throw new Error("M-1 margin reconfiguration requires DRAFT"); }, readback: async () => read(client, core, "get_mandate", ["M-1"]), expectedState: async () => read(client, core, "get_mandate", ["M-1"]) });
+          mandate = asRecord(await read(client, core, "get_mandate", ["M-1"]));
+          assertMandate(mandate, fixture, "DRAFT");
+        }
+      }
+      if (!sealPrepared) throw new Error("Unable to preserve a safe pre-seal window after bounded JIT reconfiguration");
+      await executeStep({abi, client, account, state, core, vault, label: sealLabel, functionName: "seal_mandate", args: ["M-1"], summary: [{type: "string", value: "M-1"}, {type: "validity", validFrom: mandate.valid_from, expiresAt: mandate.expires_at}], precondition: async () => { const item = asRecord(await read(client, core, "get_mandate", ["M-1"])); assertMandate(item, fixture, "DRAFT"); const reference = QUALIFICATION_VERSION === "qualification-v4" ? await readChainTimeReference(client, state, configureLabel) : {chainNow: nowSeconds(), observedLatency: 0}; assertSealWindowOpen(item, reference.chainNow, QUALIFICATION_VERSION === "qualification-v4" ? minimumSafeSealMargin(reference.observedLatency) : 0); }, readback: async () => read(client, core, "get_mandate", ["M-1"]), expectedState: async () => { const item = asRecord(await read(client, core, "get_mandate", ["M-1"])); assertMandate(item, fixture, "SEALED"); return item; }});
       mandate = asRecord(await read(client, core, "get_mandate", ["M-1"]));
     }
     assertMandate(mandate, fixture, "SEALED");
-    await waitForMandateActivation(client, state, Number(fixture.validFrom));
+    await waitForMandateActivation(client, state, mandate, recoveryPlan?.sealLabel ?? "");
 
     let counterparty = asRecord(await read(client, core, "get_counterparty", ["C-1"]));
     if (!Object.keys(counterparty).length) {
