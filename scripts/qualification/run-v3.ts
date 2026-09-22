@@ -12,17 +12,23 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const RPC = "https://studio.genlayer.com/api";
 const CHAIN_ID = 61999;
 const EXPECTED_SIGNER = "0xcb5a845638cbc1f95d7f8343278685682c3ba13f";
-const CORE_SHA = "e48b2b75f2ca26f25db2cb9aaf6ae9a09add7833af437946218493bea18e7681";
-const VAULT_SHA = "38222b8076542e2fe0185310b9b504adb05df60f6a29c5fbe8f22b1f83caa8c2";
-const ARTIFACT_DIR = path.join(ROOT, "artifacts", "studionet", "qualification-v3");
+const QUALIFICATION_VERSION = process.env.PAVEL_QUALIFICATION_VERSION ?? "qualification-v3";
+const CORE_SHA = process.env.PAVEL_CORE_SHA ?? "e48b2b75f2ca26f25db2cb9aaf6ae9a09add7833af437946218493bea18e7681";
+const VAULT_SHA = process.env.PAVEL_VAULT_SHA ?? "38222b8076542e2fe0185310b9b504adb05df60f6a29c5fbe8f22b1f83caa8c2";
+const ARTIFACT_DIR = process.env.PAVEL_ARTIFACT_DIR ?? path.join(ROOT, "artifacts", "studionet", QUALIFICATION_VERSION);
 const FIXTURE_PATH = path.join(ARTIFACT_DIR, "qualification-fixture.json");
-const STATE_PATH = path.join(ARTIFACT_DIR, "qualification-state.json");
+const STATE_PATH = path.join(ARTIFACT_DIR, process.env.PAVEL_STATE_FILE ?? "qualification-state.json");
+const TRANSACTION_LEDGER_PATH = path.join(ARTIFACT_DIR, process.env.PAVEL_TRANSACTION_FILE ?? "transactions.json");
 const POLL_MS = 5000;
 const MAX_POLLS = 720;
 const CORE_SOURCE = path.join(ROOT, "contracts", "pavel_core.py");
 const VAULT_SOURCE = path.join(ROOT, "contracts", "pavel_vault.py");
 const RPC_MIN_SPACING_MS = 2500;
 const RPC_MAX_READ_ATTEMPTS = 4;
+const RUN_PREFIX = QUALIFICATION_VERSION.replace(/[^a-z0-9]+/gi, "-");
+const RUN_STATUS_FILE = `${RUN_PREFIX}-run-status.json`;
+const RUN_PLAN_FILE = `${RUN_PREFIX}-run-plan.json`;
+const RUN_SUMMARY_FILE = `${RUN_PREFIX}-run-summary.json`;
 
 type Fixture = Record<string, any>;
 type Step = {label: string; tx: string; status: string; execution?: string; outcome?: string; readback?: any; error?: string};
@@ -144,19 +150,19 @@ function loadState(): State {
   const state = JSON.parse(readFileSync(STATE_PATH, "utf8"));
   state.steps ??= {};
   state.observations ??= {};
-  if (state.signer !== EXPECTED_SIGNER || state.rpc !== RPC || state.chainId !== CHAIN_ID) throw new Error("Qualification-v3 checkpoint network or signer mismatch");
+  if (state.signer !== EXPECTED_SIGNER || state.rpc !== RPC || state.chainId !== CHAIN_ID) throw new Error(`${QUALIFICATION_VERSION} checkpoint network or signer mismatch`);
   return state;
 }
-function saveState(state: State) { writeArtifact("qualification-state.json", state); }
+function saveState(state: State) { writeArtifact(path.basename(STATE_PATH), state); }
 function appendTransaction(entry: Record<string, any>) {
-  const file = path.join(ARTIFACT_DIR, "transactions.json");
+  const file = TRANSACTION_LEDGER_PATH;
   let doc: any = {network: "studionet", rpc: RPC, chainId: CHAIN_ID, transactions: []};
   if (existsSync(file)) doc = JSON.parse(readFileSync(file, "utf8"));
   doc.transactions ??= [];
   const index = doc.transactions.findIndex((item: any) => item.tx === entry.tx);
   if (index < 0) doc.transactions.push(jsonSafe(entry));
   else doc.transactions[index] = {...doc.transactions[index], ...jsonSafe(entry)};
-  writeArtifact("transactions.json", doc);
+  writeArtifact(path.basename(TRANSACTION_LEDGER_PATH), doc);
 }
 function sleep(ms: number) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 async function rawRpc(method: string, params: any[]) {
@@ -367,7 +373,7 @@ export function contractCodeFromFinalizedReceipt(receipt: any) {
 function persistedDeploymentCode(step: any) {
   const direct = contractCodeFromFinalizedReceipt(step?.receipt);
   if (direct) return direct;
-  const transactionPath = path.join(ARTIFACT_DIR, "transactions.json");
+  const transactionPath = TRANSACTION_LEDGER_PATH;
   if (!step?.tx || !existsSync(transactionPath)) return "";
   try {
     const document = JSON.parse(readFileSync(transactionPath, "utf8"));
@@ -377,7 +383,7 @@ function persistedDeploymentCode(step: any) {
 }
 function persistedDeploymentReceipt(step: any) {
   if (!step?.tx) return null;
-  const transactionPath = path.join(ARTIFACT_DIR, "transactions.json");
+  const transactionPath = TRANSACTION_LEDGER_PATH;
   if (!existsSync(transactionPath)) return null;
   try {
     const document = JSON.parse(readFileSync(transactionPath, "utf8"));
@@ -395,7 +401,7 @@ function deploymentConstructorAddress(step: any) {
 function persistedDeploymentAddress(step: any) {
   const direct = authoritativeDeploymentAddress(step?.receipt);
   if (direct) return direct;
-  const transactionPath = path.join(ARTIFACT_DIR, "transactions.json");
+  const transactionPath = TRANSACTION_LEDGER_PATH;
   if (!step?.tx || !existsSync(transactionPath)) return "";
   try {
     const document = JSON.parse(readFileSync(transactionPath, "utf8"));
@@ -596,13 +602,13 @@ async function prepareBindingPreflight(abi: any, client: any, state: State, core
   const accounting = assertAccounting(await read(client, vault, "get_global_accounting"), "Initial global");
   const constructorCore = deploymentConstructorAddress(state.steps["deploy:vault"]);
   const boundByHistory = history.some((item) => { try { return asRecord(item).event === "CORE_BOUND"; } catch { return false; } });
-  if (!constructorCore || !sameAddress(constructorCore, core)) throw new Error("V3 Vault constructor Core argument does not match the expected Core");
-  if (!sameAddress(coreOwner, EXPECTED_SIGNER) || !sameAddress(vaultCore, core)) throw new Error("V3 binding preflight authority or constructor state mismatch");
+  if (!constructorCore || !sameAddress(constructorCore, core)) throw new Error(`${QUALIFICATION_VERSION} Vault constructor Core argument does not match the expected Core`);
+  if (!sameAddress(coreOwner, EXPECTED_SIGNER) || !sameAddress(vaultCore, core)) throw new Error(`${QUALIFICATION_VERSION} binding preflight authority or constructor state mismatch`);
   const zero = "0x0000000000000000000000000000000000000000";
   let nextWrite = "binding-complete";
   if (normalizeAddressValue(coreVault) === zero && !boundByHistory) nextWrite = "vault:bind_core";
   else if (normalizeAddressValue(coreVault) === zero && boundByHistory) nextWrite = "core:set_vault_address";
-  else if (!sameAddress(coreVault, vault)) throw new Error("V3 Core has an unexpected nonzero Vault address");
+  else if (!sameAddress(coreVault, vault)) throw new Error(`${QUALIFICATION_VERSION} Core has an unexpected nonzero Vault address`);
   else nextWrite = "binding-complete";
   const proof = {
     "vault:bind_core": calldataProof(abi, "bind_core", []),
@@ -640,15 +646,15 @@ async function main() {
   const deps = await loadPinnedDependencies();
   const {abi, chains, createAccount, createClient, CalldataAddress, Wallet, prompt} = deps;
   const fixture = fixtureWithDefaults(readFixture());
-  if (sha256File(CORE_SOURCE) !== CORE_SHA || sha256File(VAULT_SOURCE) !== VAULT_SHA) throw new Error("Frozen qualification-v3 source hashes do not match current contract source");
+  if (sha256File(CORE_SOURCE) !== CORE_SHA || sha256File(VAULT_SOURCE) !== VAULT_SHA) throw new Error(`Frozen ${QUALIFICATION_VERSION} source hashes do not match current contract source`);
   if (chains.studionet.id !== CHAIN_ID || chains.studionet.rpcUrls.default.http[0] !== RPC) throw new Error("Pinned SDK Studionet configuration mismatch");
-  if (nowSeconds() >= Number(fixture.expiresAt)) throw new Error("Qualification-v3 fixture has expired");
+  if (nowSeconds() >= Number(fixture.expiresAt)) throw new Error(`${QUALIFICATION_VERSION} fixture has expired`);
   const state = loadState();
   const readClient = createClient({chain: chains.studionet, endpoint: RPC, account: EXPECTED_SIGNER});
   if (await RPC_SCHEDULER.enqueue("chain-id", () => readClient.getChainId(), true) !== CHAIN_ID) throw new Error("RPC is not Studionet 61999");
   normalizeCompletedDeploymentCheckpoint(state, "deploy:core");
   normalizeCompletedDeploymentCheckpoint(state, "deploy:vault");
-  const transactionPath = path.join(ARTIFACT_DIR, "transactions.json");
+  const transactionPath = TRANSACTION_LEDGER_PATH;
   const transactionDocument = existsSync(transactionPath) ? JSON.parse(readFileSync(transactionPath, "utf8")) : {transactions: []};
   const checkpointTxs = new Set(Object.values(state.steps).map((step: any) => step?.tx).filter(Boolean));
   const unexpectedTransactions = (transactionDocument.transactions ?? []).filter((entry: any) => entry?.tx && !checkpointTxs.has(entry.tx) && !String(entry.kind ?? "").startsWith("finalize:"));
@@ -676,25 +682,25 @@ async function main() {
     saveState(state);
     writeArtifact("vault-finalized-source-proof.json", {tx: state.steps["deploy:vault"]?.tx, address: state.vault, status: "FINALIZED", execution: state.steps["deploy:vault"]?.executionResult, consensusResult: state.steps["deploy:vault"]?.consensusResult, sourceParity: vaultProof});
   }
-  if (!state.core || !state.vault) throw new Error("V3 deployment checkpoint is incomplete after read-only reconciliation");
+  if (!state.core || !state.vault) throw new Error(`${QUALIFICATION_VERSION} deployment checkpoint is incomplete after read-only reconciliation`);
   const schema = await schemaParity(readClient, state.core, state.vault, persistedDeploymentCode(state.steps["deploy:core"]), persistedDeploymentCode(state.steps["deploy:vault"]));
   state.observations.schema = schema;
   let bindingPreflight: any = state.observations.bindingPreflight;
   if (!state.observations.binding?.status) bindingPreflight = await prepareBindingPreflight(abi, readClient, state, state.core, state.vault, CalldataAddress);
   if (state.steps["core:create_mandate"]?.status === "ERROR") {
-    writeArtifact("qualification-v3-run-status.json", {status: "BLOCKED_DEPLOYED_SOURCE_DEFECT", noTransactionSubmitted: true, failedStep: "core:create_mandate", nextUnfinishedWrite: "replacement-deployment-requires-explicit-authorization"});
-    throw new Error("Qualification-v3 cannot continue: deployed Core has a finalized create_mandate source error; replacement deployment requires explicit authorization");
+    writeArtifact(RUN_STATUS_FILE, {status: "BLOCKED_DEPLOYED_SOURCE_DEFECT", noTransactionSubmitted: true, failedStep: "core:create_mandate", nextUnfinishedWrite: "replacement-deployment-requires-explicit-authorization"});
+    throw new Error(`${QUALIFICATION_VERSION} cannot continue: deployed Core has a finalized create_mandate source error; replacement deployment requires explicit authorization`);
   }
   const selectedKeystore = findExpectedKeystore();
   if (!sameAddress(selectedKeystore.address, EXPECTED_SIGNER)) throw new Error("Expected qualification keystore resolution failed");
   const nonce = await RPC_SCHEDULER.enqueue("deployer-nonce", () => readClient.getCurrentNonce({address: EXPECTED_SIGNER}), true);
-  const plan = {qualificationVersion: "qualification-v3", network: "studionet", rpc: RPC, chainId: CHAIN_ID, signer: EXPECTED_SIGNER, selectedKeystore: {name: selectedKeystore.name, address: selectedKeystore.address}, sourceHashes: {core: CORE_SHA, vault: VAULT_SHA}, fixture: {validFrom: fixture.validFrom, expiresAt: fixture.expiresAt, amount: "1", authority: fixture.authority}, checkpoint: {core: state.core ?? null, vault: state.vault ?? null, steps: Object.keys(state.steps)}, deployerNonce: String(nonce), nextUnfinishedWrite: bindingPreflight?.nextWrite ?? "unknown", rpcScheduler: RPC_SCHEDULER.snapshot(), explicitAuthorization: "user-authorized-qualification-v3"};
-  writeArtifact("qualification-v3-run-plan.json", plan);
-  console.log(JSON.stringify({QUALIFICATION_V3_PLAN: plan}, null, 2));
-  if (process.argv.includes("--preflight-only")) { writeArtifact("qualification-v3-run-status.json", {status: "PREFLIGHT_ONLY", plan, noTransactionSubmitted: true}); return; }
-  const confirmation = await prompt([{type: "confirm", name: "begin", message: "Begin the authorized qualification-v3 deployment and lifecycle?", default: true}]);
-  if (confirmation?.begin !== true) { console.log("QUALIFICATION_V3_RUN=ABORTED_BY_USER"); return; }
-  writeArtifact("qualification-v3-run-status.json", {status: "AWAITING_SECURE_KEYSTORE_PASSWORD", selectedKeystore: {name: selectedKeystore.name, address: selectedKeystore.address}, noTransactionSubmitted: true});
+  const plan = {qualificationVersion: QUALIFICATION_VERSION, network: "studionet", rpc: RPC, chainId: CHAIN_ID, signer: EXPECTED_SIGNER, selectedKeystore: {name: selectedKeystore.name, address: selectedKeystore.address}, sourceHashes: {core: CORE_SHA, vault: VAULT_SHA}, fixture: {validFrom: fixture.validFrom, expiresAt: fixture.expiresAt, amount: "1", authority: fixture.authority}, checkpoint: {core: state.core ?? null, vault: state.vault ?? null, steps: Object.keys(state.steps)}, deployerNonce: String(nonce), nextUnfinishedWrite: bindingPreflight?.nextWrite ?? "unknown", rpcScheduler: RPC_SCHEDULER.snapshot(), explicitAuthorization: `user-authorized-${QUALIFICATION_VERSION}`};
+  writeArtifact(RUN_PLAN_FILE, plan);
+  console.log(JSON.stringify({[`${QUALIFICATION_VERSION.toUpperCase().replace(/-/g, "_")}_PLAN`]: plan}, null, 2));
+  if (process.argv.includes("--preflight-only")) { writeArtifact(RUN_STATUS_FILE, {status: "PREFLIGHT_ONLY", plan, noTransactionSubmitted: true}); return; }
+  const confirmation = await prompt([{type: "confirm", name: "begin", message: `Begin the authorized ${QUALIFICATION_VERSION} deployment and lifecycle?`, default: true}]);
+  if (confirmation?.begin !== true) { console.log(`${QUALIFICATION_VERSION.toUpperCase().replace(/-/g, "_")}_RUN=ABORTED_BY_USER`); return; }
+  writeArtifact(RUN_STATUS_FILE, {status: "AWAITING_SECURE_KEYSTORE_PASSWORD", selectedKeystore: {name: selectedKeystore.name, address: selectedKeystore.address}, noTransactionSubmitted: true});
   let password = "";
   let wallet: any = null;
   let signingSecret = "";
@@ -708,7 +714,7 @@ async function main() {
     if (!sameAddress(account.address, EXPECTED_SIGNER)) throw new Error("Decrypted signer does not match qualification signer");
     client = createClient({chain: chains.studionet, endpoint: RPC, account});
     await client.initializeConsensusSmartContract();
-    writeArtifact("qualification-v3-run-status.json", {status: "ACTIVE_IN_MEMORY", selectedKeystore: {name: selectedKeystore.name, address: selectedKeystore.address}, noTransactionSubmitted: true});
+    writeArtifact(RUN_STATUS_FILE, {status: "ACTIVE_IN_MEMORY", selectedKeystore: {name: selectedKeystore.name, address: selectedKeystore.address}, noTransactionSubmitted: true});
 
     let core = state.core ?? "";
     let vault = state.vault ?? "";
@@ -752,7 +758,7 @@ async function main() {
     if (!Object.keys(mandate).length) throw new Error("M-1 was not created");
     if (mandate.status === "DRAFT" && asText(mandate.title) === "") {
       const args = ["M-1", fixture.title, fixture.purpose, fixture.constitution, fixture.permittedActivity, fixture.forbiddenActivity, BigInt(fixture.maximumSingleTransaction), BigInt(fixture.epochBudget), BigInt(fixture.epochDurationSeconds), BigInt(fixture.totalBudget), BigInt(fixture.validFrom), BigInt(fixture.expiresAt), BigInt(fixture.challengeWindowSeconds), fixture.evidencePolicy, fixture.deployedAuthorityConstraints, fixture.fulfillmentPolicy, fixture.recoveryPolicy, false];
-      await executeStep({abi, client, account, state, core, vault, label: "core:configure_mandate", functionName: "configure_mandate", args, summary: [{type: "string", value: "M-1"}, {type: "policy", value: "qualification-v3-fixture"}], precondition: async () => { if (asRecord(await read(client, core, "get_mandate", ["M-1"])).status !== "DRAFT") throw new Error("M-1 is not configurable"); }, readback: async () => read(client, core, "get_mandate", ["M-1"]), expectedState: async () => read(client, core, "get_mandate", ["M-1"])});
+      await executeStep({abi, client, account, state, core, vault, label: "core:configure_mandate", functionName: "configure_mandate", args, summary: [{type: "string", value: "M-1"}, {type: "policy", value: `${QUALIFICATION_VERSION}-fixture`}], precondition: async () => { if (asRecord(await read(client, core, "get_mandate", ["M-1"])).status !== "DRAFT") throw new Error("M-1 is not configurable"); }, readback: async () => read(client, core, "get_mandate", ["M-1"]), expectedState: async () => read(client, core, "get_mandate", ["M-1"])});
       mandate = asRecord(await read(client, core, "get_mandate", ["M-1"]));
     }
     assertMandate(mandate, fixture, "DRAFT");
@@ -781,7 +787,7 @@ async function main() {
     const intentExpiresAt = Math.min(Number(fixture.expiresAt), nowSeconds() + 3600);
     let intent = asRecord(await read(client, core, "get_intent", ["I-1"]));
     if (!Object.keys(intent).length) {
-      const args = ["M-1", "C-1", address(CalldataAddress, EXPECTED_SIGNER), 1n, "Qualification-v3 purchase", fixture.purpose, fixture.deliverable, fixture.commercialTerms, fixture.fulfillmentCriteria, BigInt(intentExpiresAt)];
+      const args = ["M-1", "C-1", address(CalldataAddress, EXPECTED_SIGNER), 1n, `${QUALIFICATION_VERSION} purchase`, fixture.purpose, fixture.deliverable, fixture.commercialTerms, fixture.fulfillmentCriteria, BigInt(intentExpiresAt)];
       await executeStep({abi, client, account, state, core, vault, label: "core:create_intent:positive", functionName: "create_intent", args, summary: [{type: "string", value: "M-1"}, {type: "string", value: "C-1"}, {type: "Address", value: EXPECTED_SIGNER}, {type: "u256", value: "1"}], precondition: async () => {}, readback: async () => read(client, core, "get_intent", ["I-1"]), expectedState: async () => read(client, core, "get_intent", ["I-1"])});
       intent = asRecord(await read(client, core, "get_intent", ["I-1"]));
     }
@@ -803,7 +809,7 @@ async function main() {
     const reservationItem = asRecord(reservation); if (reservationItem.status !== "RESERVED" || reservationItem.intent_id !== "I-1" || reservationItem.mandate_id !== "M-1" || reservationItem.amount !== "1" || !sameAddress(reservationItem.recipient, EXPECTED_SIGNER)) throw new Error("Positive reservation readback mismatch");
 
     let intent2 = asRecord(await read(client, core, "get_intent", ["I-2"]));
-    if (!Object.keys(intent2).length) { const args = ["M-1", "C-1", address(CalldataAddress, EXPECTED_SIGNER), 1n, "Qualification-v3 unassessed proof", fixture.purpose, fixture.deliverable, fixture.commercialTerms, fixture.fulfillmentCriteria, BigInt(intentExpiresAt)]; await executeStep({abi, client, account, state, core, vault, label: "core:create_intent:unassessed", functionName: "create_intent", args, summary: [{type: "intent", id: "I-2", state: "DRAFT"}], precondition: async () => {}, readback: async () => read(client, core, "get_intent", ["I-2"]), expectedState: async () => read(client, core, "get_intent", ["I-2"])}); intent2 = asRecord(await read(client, core, "get_intent", ["I-2"])); }
+    if (!Object.keys(intent2).length) { const args = ["M-1", "C-1", address(CalldataAddress, EXPECTED_SIGNER), 1n, `${QUALIFICATION_VERSION} unassessed proof`, fixture.purpose, fixture.deliverable, fixture.commercialTerms, fixture.fulfillmentCriteria, BigInt(intentExpiresAt)]; await executeStep({abi, client, account, state, core, vault, label: "core:create_intent:unassessed", functionName: "create_intent", args, summary: [{type: "intent", id: "I-2", state: "DRAFT"}], precondition: async () => {}, readback: async () => read(client, core, "get_intent", ["I-2"]), expectedState: async () => read(client, core, "get_intent", ["I-2"])}); intent2 = asRecord(await read(client, core, "get_intent", ["I-2"])); }
     if (intent2.status === "DRAFT") { await executeStep({abi, client, account, state, core, vault, label: "core:submit_intent:unassessed", functionName: "submit_intent", args: ["I-2"], summary: [{type: "string", value: "I-2"}], precondition: async () => {}, readback: async () => read(client, core, "get_intent", ["I-2"]), expectedState: async () => read(client, core, "get_intent", ["I-2"])}); intent2 = asRecord(await read(client, core, "get_intent", ["I-2"])); }
     const unassessedProof = await simulateUnassessed(client, vault, account, "I-2");
 
@@ -832,8 +838,8 @@ async function main() {
     const finalUnassessed = asRecord(await read(client, core, "get_intent", ["I-2"]));
     const finalAccounting = {global: finalGlobal, mandate: finalMandateAccounting, reservation: await read(client, vault, "get_reservation", ["I-1"]), intent: finalIntent, unassessed: finalUnassessed};
     writeArtifact("qualification-final-readbacks.json", {core, vault, accounting: finalAccounting, unassessedProof, vectors: {authorization: authorization.vector ?? {}, fulfillment: fulfillment.vector ?? {}}, externalObservation});
-    writeArtifact("qualification-v3-run-summary.json", {status: "COMPLETED_LIVE_FLOW", core, vault, mandateId: "M-1", positiveIntentId: "I-1", unassessedIntentId: "I-2", rootMandateTx: state.steps["core:create_mandate"]?.tx ?? null, settlementTx: settlementTx || null, thirdPartyChallenge: "BLOCKED_BY_SECOND_SIGNER", finalAccounting, externalObservation});
-    console.log("QUALIFICATION_V3_RUN=COMPLETED_LIVE_FLOW");
+    writeArtifact(RUN_SUMMARY_FILE, {status: "COMPLETED_LIVE_FLOW", core, vault, mandateId: "M-1", positiveIntentId: "I-1", unassessedIntentId: "I-2", rootMandateTx: state.steps["core:create_mandate"]?.tx ?? null, settlementTx: settlementTx || null, thirdPartyChallenge: "BLOCKED_BY_SECOND_SIGNER", finalAccounting, externalObservation});
+    console.log(`${QUALIFICATION_VERSION.toUpperCase().replace(/-/g, "_")}_RUN=COMPLETED_LIVE_FLOW`);
   } finally {
     password = "";
     signingSecret = "";
@@ -843,6 +849,8 @@ async function main() {
   }
 }
 
+export const runQualification = main;
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  main().catch((error) => { console.error(`QUALIFICATION_V3_RUN=STOPPED ${String(error?.message ?? error)}`); writeArtifact("qualification-v3-run-summary.json", {status: "STOPPED", error: String(error?.message ?? error)}); process.exitCode = 1; });
+  main().catch((error) => { console.error(`${QUALIFICATION_VERSION.toUpperCase().replace(/-/g, "_")}_RUN=STOPPED ${String(error?.message ?? error)}`); writeArtifact(RUN_SUMMARY_FILE, {status: "STOPPED", error: String(error?.message ?? error)}); process.exitCode = 1; });
 }
