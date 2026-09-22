@@ -1,0 +1,271 @@
+{
+  "schema": "pavel-qualification-constraints-v1",
+  "sourceFiles": [
+    "contracts/pavel_core.py",
+    "contracts/pavel_vault.py"
+  ],
+  "sourceHashes": {
+    "core": "6ece0d1aae99ccbd734b97802c9ca2481a38264da593b43ca8a5d7ab188c7053",
+    "vault": "d967d6f1e70cd698fc428338ca822c5541ce07fd7977517db7bb19f9796aa8ed"
+  },
+  "constants": {
+    "maxText": 4096,
+    "maxShortText": 256,
+    "maxUrl": 512,
+    "maxSourceBytes": 8192,
+    "maxEvidence": 8,
+    "maxChallengeRecordsPerIntent": 64,
+    "maxQualifyingChallengesPerIntent": 16,
+    "accountingInvariant": "available + reserved + release_pending + refund_pending + recovered == deposited"
+  },
+  "authorityAndTransport": {
+    "authority": {
+      "type": "hostname-identity",
+      "sourceRule": "Mandate authority_constraints and expected_authority are host identities; they are lower-cased, bounded, and may not contain '/', '@', or spaces."
+    },
+    "transport": {
+      "type": "https-url",
+      "sourceRule": "_url_host requires an exact https:// prefix, a non-empty authority, no whitespace, no '#', no credentials, and a host of at most 253 characters."
+    },
+    "qualificationFixture": {
+      "authority": "docs.genlayer.com",
+      "transportUrl": "https://docs.genlayer.com/robots.txt"
+    }
+  },
+  "remainingLifecycle": [
+    {
+      "step": "core:register_counterparty:corrected",
+      "contract": "Core",
+      "method": "register_counterparty",
+      "signature": "register_counterparty(Address bound_wallet, str label, str authority_origin) -> str",
+      "callerRequirement": "caller must be in Core.principals",
+      "inputs": {
+        "bound_wallet": "nonzero Address; duplicate wallet identity is rejected",
+        "label": "required string, length <= MAX_SHORT_TEXT",
+        "authority_origin": "transport URL parsed by _url_host; stored as the lower-cased hostname identity"
+      },
+      "rules": {
+        "address": "wallet must not already be in counterparty_by_wallet",
+        "url": "exact HTTPS URL; no credentials, whitespace, '#', or empty host",
+        "state": "counterparty identity capacity must not be exhausted",
+        "mandate": "no direct mandate-state requirement; later Intent creation binds C-1 to active M-1"
+      },
+      "expectedMutation": "creates C-1, appends counterparty_identity_ids, indexes wallet, records COUNTERPARTY_REGISTERED history",
+      "postcondition": "get_counterparty('C-1') is active, bound_wallet is signer, label matches, authority_origin is docs.genlayer.com",
+      "failureConditions": ["unregistered principal", "duplicate wallet", "capacity", "invalid label", "invalid HTTPS origin"]
+    },
+    {
+      "step": "vault:deposit",
+      "contract": "Vault",
+      "method": "deposit",
+      "signature": "deposit(str mandate_id) payable -> None",
+      "callerRequirement": "caller equals the mandate principal; Core must be bound",
+      "inputs": {"mandate_id": "existing Core mandate id", "value": "native GEN > 0; exactly 1 for qualification"},
+      "rules": {
+        "mandate": "mandate status must be DRAFT or SEALED",
+        "accounting": "creates/updates mandate account and preserves conservation",
+        "replay": "no protocol duplicate guard; runner must preflight exact existing deposit and never top up beyond 1"
+      },
+      "expectedMutation": "deposited and available increase by msg.value; global totals increase by msg.value",
+      "postcondition": "M-1 accounting is deposited=1, available=1, all other buckets=0, conserved=true"
+    },
+    {
+      "step": "core:create_intent:positive",
+      "contract": "Core",
+      "method": "create_intent",
+      "signature": "create_intent(str mandate_id, str counterparty, Address recipient, u256 amount, str title, str purpose, str deliverable, str commercial_terms, str fulfillment_criteria, u256 expires_at) -> str",
+      "callerRequirement": "caller equals sealed mandate authorized_agent",
+      "inputs": {
+        "mandate_id": "M-1",
+        "counterparty": "active registered identity C-1",
+        "recipient": "nonzero typed Address; qualification recipient is the bound counterparty wallet",
+        "amount": "positive and <= maximum_single_transaction; qualification amount is 1",
+        "text": "title, purpose, deliverable, commercial_terms, fulfillment_criteria required and each <= MAX_TEXT",
+        "expires_at": "strictly greater than current chain time and <= mandate expires_at"
+      },
+      "rules": {
+        "mandate": "SEALED and valid_from <= chain_now < expires_at",
+        "budgets": "amount is checked against single cap; Vault reserve later checks epoch and total budgets",
+        "recipient": "stored immutably in the Intent; no alternate recipient is permitted by runner"
+      },
+      "expectedMutation": "creates I-1 in DRAFT with counterparty authority/fingerprint and empty authorization/fulfillment",
+      "postcondition": "I-1 fields equal typed fixture and status=DRAFT"
+    },
+    {
+      "step": "core:submit_intent:positive",
+      "contract": "Core",
+      "method": "submit_intent",
+      "signature": "submit_intent(str intent_id) -> None",
+      "callerRequirement": "caller equals Intent agent",
+      "inputs": {"intent_id": "I-1 in DRAFT"},
+      "rules": {"mandate": "mandate remains SEALED", "timing": "intent is not expired at chain_now"},
+      "expectedMutation": "sets submitted_at, status=SUBMITTED, and immutable intent_fingerprint",
+      "postcondition": "I-1 status=SUBMITTED and fingerprint is a 64-character hash"
+    },
+    {
+      "step": "core:define_evidence:authorization",
+      "contract": "Core",
+      "method": "define_evidence",
+      "signature": "define_evidence(str intent_id, str evidence_kind, str origin_url, str expected_authority, str expected_hash, u256 committed_byte_length, str approved_recovery_authority, u256 sequence) -> str",
+      "callerRequirement": "caller equals Intent agent or principal",
+      "inputs": {
+        "evidence_kind": "one of source-valid evidence kinds; PRODUCT_SERVICE is used for authorization",
+        "origin_url": "exact HTTPS URL whose parsed host equals expected_authority",
+        "expected_authority": "lower-cased host identity permitted by sealed mandate",
+        "expected_hash_and_length": "both empty/zero or a 64-hex hash paired with length <= MAX_SOURCE_BYTES",
+        "approved_recovery_authority": "optional host identity; defaults to expected_authority and must be policy-allowed",
+        "sequence": "append-only evidence_count; authorization uses sequence 0"
+      },
+      "rules": {"state": "SUBMITTED or source-defined retry/repair/authorized/fulfillment states", "binding": "evidence policy fingerprint binds to Intent"},
+      "expectedMutation": "append-only evidence definition E-1; not yet captured",
+      "postcondition": "E-1 origin/authority/hash/length/sequence exactly match typed calldata"
+    },
+    {
+      "step": "core:stage_evidence:authorization",
+      "contract": "Core",
+      "method": "stage_evidence",
+      "signature": "stage_evidence(str intent_id) -> None",
+      "callerRequirement": "source-defined public write; evidence definitions must exist",
+      "inputs": {"intent_id": "I-1 with at least one uncaptured definition"},
+      "rules": {
+        "capture": "authenticated capture must be HTTP 200, non-empty, <= MAX_SOURCE_BYTES, host/policy/hash/length consistent",
+        "consensus": "leader and independent validator capture results must be valid and equal",
+        "failure": "infrastructure/malformed capture stores retry or repair status; it is not completion"
+      },
+      "expectedMutation": "authenticated snapshot and evidence_set_identity; status=EVIDENCE_READY",
+      "postcondition": "I-1 status=EVIDENCE_READY and E-1 captured"
+    },
+    {
+      "step": "core:authorize_intent",
+      "contract": "Core",
+      "method": "authorize_intent",
+      "signature": "authorize_intent(str intent_id) -> None",
+      "callerRequirement": "source-defined public write; evidence must be EVIDENCE_READY",
+      "inputs": {"intent_id": "I-1", "semanticOutput": "dynamic GenVM pavel-authorization-v1 result; runner must not hardcode a favorable result"},
+      "rules": {
+        "schema": "exact schema plus twelve boolean semantic fields and bounded explanation",
+        "consensus": "independent semantic results must be valid and agree",
+        "decision": "all required booleans true => AUTHORIZED; otherwise REJECTED; malformed/disagreement => AUTHORIZATION_RETRY_REQUIRED",
+        "safety": "UNASSESSED, retry, rejected, or inconclusive never satisfy Vault authorization"
+      },
+      "expectedMutation": "authorization record with snapshot, mandate fingerprint, intent fingerprint, semantic vector and decision",
+      "postcondition": "positive path requires status=AUTHORIZED and authorization.decision=AUTHORIZED"
+    },
+    {
+      "step": "vault:reserve:positive",
+      "contract": "Vault",
+      "method": "reserve",
+      "signature": "reserve(str intent_id) -> None",
+      "callerRequirement": "caller is Core authorization agent or principal; Core auth view must say AUTHORIZED",
+      "inputs": {"intent_id": "I-1 with no existing reservation"},
+      "rules": {
+        "crossContract": "Core get_authorization_for_vault must match authorized Intent, mandate, recipient, amount and fingerprints",
+        "mandate": "SEALED (or revoked with allow_prior_reservations); intent and mandate not expired",
+        "accounting": "available >= amount; amount <= single cap, epoch budget and total budget",
+        "replay": "intent_id must not already be reserved"
+      },
+      "expectedMutation": "available decreases by 1, reserved increases by 1, committed and epoch_spent increase by 1, reservation status=RESERVED",
+      "postcondition": "reservation matches I-1/M-1/recipient/amount and accounting remains conserved"
+    },
+    {
+      "step": "read-only:unassessed-proof",
+      "contract": "Core/Vault",
+      "method": "get_intent + get_authorization_for_vault",
+      "signature": "read-only proof; no write",
+      "callerRequirement": "none beyond view access",
+      "inputs": {"intent_id": "absent/unassessed I-2 probe"},
+      "rules": {"safety": "absence of an authorization record is not AUTHORIZED and must not be converted into a live negative write"},
+      "expectedMutation": "none",
+      "postcondition": "proof records UNASSESSED_NOT_CLEARED and no transaction hash"
+    },
+    {
+      "step": "core:start_fulfillment",
+      "contract": "Core",
+      "method": "start_fulfillment",
+      "signature": "start_fulfillment(str intent_id) -> None",
+      "callerRequirement": "source-defined public write; Intent status AUTHORIZED",
+      "inputs": {"intent_id": "I-1"},
+      "rules": {"crossContract": "Vault reservation must exactly match Intent and be RESERVED"},
+      "expectedMutation": "Intent status=FULFILLMENT_PENDING",
+      "postcondition": "I-1 is FULFILLMENT_PENDING"
+    },
+    {
+      "step": "core:define_evidence:fulfillment",
+      "contract": "Core",
+      "method": "define_evidence",
+      "signature": "same define_evidence signature; sequence 1",
+      "callerRequirement": "caller equals Intent agent or principal",
+      "inputs": {"evidence_kind": "FULFILLMENT", "origin_url": "same validated HTTPS transport", "expected_authority": "docs.genlayer.com", "sequence": "1"},
+      "rules": {"binding": "append-only after authorization evidence; URL/hash/length rules identical"},
+      "expectedMutation": "append-only fulfillment evidence definition",
+      "postcondition": "sequence 1 definition is bound to I-1 and policy authority"
+    },
+    {
+      "step": "core:stage_evidence:fulfillment",
+      "contract": "Core",
+      "method": "stage_evidence",
+      "signature": "stage_evidence(str intent_id) -> None",
+      "callerRequirement": "public write; uncaptured fulfillment definition exists",
+      "inputs": {"intent_id": "I-1"},
+      "rules": {"capture": "same authenticated HTTPS and hash/length rules; no favorable result is assumed"},
+      "expectedMutation": "authenticated fulfillment snapshot and EVIDENCE_READY/pending source state",
+      "postcondition": "fulfillment evidence is captured; failed capture is retry/repair, never success"
+    },
+    {
+      "step": "core:assess_fulfillment",
+      "contract": "Core",
+      "method": "assess_fulfillment",
+      "signature": "assess_fulfillment(str intent_id) -> None",
+      "callerRequirement": "source-defined public write; Intent FULFILLMENT_PENDING and matching RESERVED reservation",
+      "inputs": {"intent_id": "I-1", "semanticOutput": "dynamic pavel-fulfillment-v1 result; no favorable hardcode"},
+      "rules": {
+        "schema": "nine boolean fields, outcome FULFILLED/NOT_FULFILLED/INDETERMINATE, bounded explanation",
+        "consensus": "independent vectors and outcome must agree",
+        "outcomes": "FULFILLED -> RELEASE_TO_COUNTERPARTY; NOT_FULFILLED -> REFUND_TO_PRINCIPAL; INDETERMINATE/error -> retry state and no settlement"
+      },
+      "expectedMutation": "fulfillment record, settlement direction, ready_at=chain_now+challenge_window for determinate result",
+      "postcondition": "positive path requires FULFILLED and RELEASE_TO_COUNTERPARTY"
+    },
+    {
+      "step": "core:get_settlement_instruction",
+      "contract": "Core",
+      "method": "get_settlement_instruction",
+      "signature": "get_settlement_instruction(str intent_id) -> str (view)",
+      "callerRequirement": "view",
+      "inputs": {"intent_id": "I-1"},
+      "rules": {"challenge": "qualifying open challenge returns CHALLENGE_BLOCKED and oldest_open_challenge", "timing": "runner waits on chain time >= ready_at, never wall clock"},
+      "expectedMutation": "none",
+      "postcondition": "direction RELEASE_TO_COUNTERPARTY, no qualifying open challenge, ready_at reached"
+    },
+    {
+      "step": "vault:request_release",
+      "contract": "Vault",
+      "method": "request_release",
+      "signature": "request_release(str intent_id) -> None",
+      "callerRequirement": "Vault public write; Core settlement instruction authorizes release",
+      "inputs": {"intent_id": "I-1"},
+      "rules": {
+        "crossContract": "Core direction must be RELEASE_TO_COUNTERPARTY",
+        "timing": "Vault chain_now >= ready_at",
+        "reservation": "RESERVED and settlement_by_intent empty",
+        "replay": "derived settlement id must not already exist",
+        "external": "recipient is immutable reservation recipient; native amount is reservation amount"
+      },
+      "expectedMutation": "reservation RELEASE_PENDING; reserved decreases; release_pending increases; settlement external_observation=UNCONFIRMED before message",
+      "postcondition": "settlement exists with RELEASE_PENDING and nonempty settlement_id; parent finalization does not prove external delivery"
+    }
+  ],
+  "challenge": {
+    "runnerStatus": "BLOCKED_BY_SECOND_SIGNER",
+    "positiveFlowRule": "No challenge exists, so the positive flow must not require a second signer; if a qualifying challenge appears, settlement is blocked until source-defined adjudication/expiry rules resolve it."
+  },
+  "accounting": {
+    "perMandate": "available + reserved + release_pending + refund_pending + recovered == deposited",
+    "global": "total_available + total_reserved + total_release_pending + total_refund_pending + total_recovered == total_deposited",
+    "expectedStages": [
+      {"stage": "after deposit", "deposited": "1", "available": "1", "reserved": "0", "release_pending": "0", "refund_pending": "0", "recovered": "0"},
+      {"stage": "after reservation", "deposited": "1", "available": "0", "reserved": "1", "release_pending": "0", "refund_pending": "0", "recovered": "0"},
+      {"stage": "after release request", "deposited": "1", "available": "0", "reserved": "0", "release_pending": "1", "refund_pending": "0", "recovered": "0"}
+    ]
+  }
+}

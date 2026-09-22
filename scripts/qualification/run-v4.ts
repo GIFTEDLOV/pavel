@@ -45,5 +45,9 @@ process.env.PAVEL_ARTIFACT_DIR = ARTIFACT_DIR;
 process.env.PAVEL_STATE_FILE = "checkpoint.json";
 process.env.PAVEL_TRANSACTION_FILE = "transaction-ledger.json";
 
+// The comprehensive preflight is a zero-write gate. It must pass before the
+// lifecycle runner is imported and before any secure password prompt can occur.
+execFileSync(process.execPath, ["--experimental-strip-types", path.join(ROOT, "scripts", "qualification", "preflight-v4.ts")], {cwd: ROOT, stdio: "inherit"});
+
 const {runQualification} = await import("./run-v3.ts");
 await runQualification();

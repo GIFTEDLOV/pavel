@@ -32,6 +32,36 @@ const RUN_SUMMARY_FILE = `${RUN_PREFIX}-run-summary.json`;
 const RPC_CAPABILITY_CACHE_FILE = path.join(ARTIFACT_DIR, "rpc-capability-cache.json");
 const MINIMUM_SEAL_SUBMISSION_MARGIN_SECONDS = 90;
 
+// Every remaining lifecycle write uses the same explicit transition:
+// precondition -> prepared calldata -> one submission -> finalized result ->
+// postcondition -> checkpoint. This phase model is shared by reporting and
+// regression tests so recovery branches cannot silently skip a gate.
+export const QUALIFICATION_PHASES = [
+  "COUNTERPARTY",
+  "DEPOSIT",
+  "INTENT",
+  "EVIDENCE",
+  "AUTHORIZATION",
+  "RESERVATION",
+  "UNASSESSED_PROOF",
+  "FULFILLMENT",
+  "SETTLEMENT_AUTHORIZATION",
+  "VAULT_SETTLEMENT",
+  "ACCOUNTING",
+] as const;
+export type QualificationPhase = typeof QUALIFICATION_PHASES[number];
+export function qualificationPhaseForLabel(label: string): QualificationPhase | "SETUP" {
+  if (label.includes("register_counterparty")) return "COUNTERPARTY";
+  if (label.includes("deposit")) return "DEPOSIT";
+  if (label.includes("intent")) return "INTENT";
+  if (label.includes("evidence")) return "EVIDENCE";
+  if (label.includes("authorize")) return "AUTHORIZATION";
+  if (label.includes("reserve")) return "RESERVATION";
+  if (label.includes("fulfillment")) return "FULFILLMENT";
+  if (label.includes("request_release")) return "VAULT_SETTLEMENT";
+  return "SETUP";
+}
+
 type Fixture = Record<string, any>;
 type Step = {label: string; tx: string; status: string; execution?: string; outcome?: string; readback?: any; error?: string};
 type State = {
@@ -293,7 +323,7 @@ export function assertEvidenceTransport(evidenceUrl: string, evidenceAuthority: 
   const url = String(evidenceUrl ?? "").trim();
   const authority = String(evidenceAuthority ?? "").trim().toLowerCase();
   if (!url.startsWith("https://")) throw new Error("Evidence URL must start with exactly https://");
-  if (url.length > 2048 || /\s/.test(url)) throw new Error("Evidence URL length/content is invalid");
+  if (url.length > 512 || /\s/.test(url)) throw new Error("Evidence URL length/content is invalid");
   let parsed: URL;
   try { parsed = new URL(url); } catch { throw new Error("Evidence URL parser rejected the URL"); }
   if (parsed.protocol !== "https:" || parsed.username || parsed.password || !parsed.hostname) throw new Error("Evidence URL must be a credential-free HTTPS URL");
@@ -310,6 +340,18 @@ function assertCounterpartyCalldataRoundTrip(abi: any, args: any[]) {
   if (decodedArgs.length !== 3 || !sameAddress(addressArg, EXPECTED_SIGNER) || decodedArgs[1] !== args[1] || decodedArgs[2] !== args[2]) {
     throw new Error("register_counterparty typed calldata round-trip mismatch");
   }
+  return proof;
+}
+function assertCreateIntentCalldataRoundTrip(abi: any, args: any[]) {
+  const proof = calldataProof(abi, "create_intent", args);
+  const encoded = abi.calldata.encode(abi.calldata.makeCalldataObject("create_intent", args, undefined));
+  const decoded = abi.calldata.decode(encoded);
+  const map = decoded instanceof Map ? decoded : new Map(Object.entries(decoded));
+  const decodedArgs: any[] = map.get("args") ?? [];
+  const addressArg = decodedArgs[2]?.bytes ? `0x${Buffer.from(decodedArgs[2].bytes).toString("hex")}` : String(decodedArgs[2] ?? "");
+  const equalText = (index: number) => decodedArgs[index] === args[index];
+  const equalNumber = (index: number) => String(decodedArgs[index]) === String(args[index]);
+  if (decodedArgs.length !== 10 || decodedArgs[0] !== args[0] || decodedArgs[1] !== args[1] || !sameAddress(addressArg, EXPECTED_SIGNER) || !equalNumber(3) || !equalText(4) || !equalText(5) || !equalText(6) || !equalText(7) || !equalText(8) || !equalNumber(9)) throw new Error("create_intent typed calldata round-trip mismatch");
   return proof;
 }
 function fixtureWithDefaults(fixture: Fixture) {
@@ -360,14 +402,32 @@ function assertMandate(mandate: Record<string, any>, fixture: Fixture, status?: 
   if (status === "SEALED" && asText(mandate.definition_hash) === "") throw new Error("M-1 sealed policy fingerprint is missing");
   return mandate;
 }
+function syncFixtureValidityFromMandate(fixture: Fixture, mandate: Record<string, any>) {
+  const validFrom = Number(mandate.valid_from);
+  const expiresAt = Number(mandate.expires_at);
+  if (!Number.isSafeInteger(validFrom) || !Number.isSafeInteger(expiresAt) || expiresAt <= validFrom) throw new Error("M-1 chain validity interval is invalid");
+  return {...fixture, validFrom, expiresAt};
+}
+function assertGlobalMatchesMandate(global: Record<string, any>, mandate: Record<string, any>, label: string) {
+  for (const field of ["deposited", "available", "reserved", "release_pending", "refund_pending", "recovered"]) {
+    if (String(global[field] ?? "0") !== String(mandate[field] ?? "0")) throw new Error(`${label} global/mandate accounting mismatch for ${field}`);
+  }
+  return global;
+}
 function assertIntent(intent: Record<string, any>, fixture: Fixture) {
-  const expected: Record<string, any> = {mandate_id: "M-1", agent: EXPECTED_SIGNER, principal: EXPECTED_SIGNER, recipient: EXPECTED_SIGNER, counterparty_identity_id: "C-1", amount: "1", purpose: fixture.purpose, deliverable: fixture.deliverable, commercial_terms: fixture.commercialTerms, fulfillment_criteria: fixture.fulfillmentCriteria};
+  const expected: Record<string, any> = {mandate_id: "M-1", agent: EXPECTED_SIGNER, principal: EXPECTED_SIGNER, recipient: EXPECTED_SIGNER, counterparty_identity_id: "C-1", amount: "1", title: `${QUALIFICATION_VERSION} purchase`, purpose: fixture.purpose, deliverable: fixture.deliverable, commercial_terms: fixture.commercialTerms, fulfillment_criteria: fixture.fulfillmentCriteria};
   for (const [field, value] of Object.entries(expected)) {
     const addressField = ["agent", "principal", "recipient"].includes(field);
     const actual = addressField ? asText(intent[field]) : intent[field];
     if (addressField ? !sameAddress(actual, value) : actual !== value) throw new Error(`Intent readback mismatch for ${field}`);
   }
-  if (asText(intent.intent_fingerprint) === "") throw new Error("Intent fingerprint is missing");
+  if (intent.status !== "DRAFT" && asText(intent.intent_fingerprint) === "") throw new Error("Intent fingerprint is missing after submission");
+}
+function assertEvidenceDefinition(definition: Record<string, any>, kind: string, sequence: string, fixture: Fixture) {
+  if (!definition.evidence_id || definition.evidence_kind !== kind || definition.sequence !== sequence || definition.origin_url !== fixture.evidenceTransportUrl || definition.expected_authority !== fixture.evidenceAuthority || definition.expected_hash !== "" || definition.committed_sha256 !== "" || definition.committed_byte_length !== "0") {
+    throw new Error(`Evidence definition postcondition mismatch for ${kind} sequence ${sequence}`);
+  }
+  return definition;
 }
 
 function finalizedMonitoringTimestamp(receipt: any) {
@@ -466,6 +526,17 @@ async function waitForMandateActivation(client: any, state: State, mandate: Reco
     writeArtifact("mandate-activation-wait.json", {status: "WAITING", validFrom: mandate.valid_from, expiresAt: mandate.expires_at, chainNow, sourceTx: reference.sourceTx});
     console.log(`WAITING_FOR_MANDATE_ACTIVATION=${mandate.valid_from}`);
     await sleep(POLL_MS);
+  }
+}
+async function waitForSettlementReady(client: any, state: State, instruction: Record<string, any>, timeReferenceLabel = "") {
+  if (QUALIFICATION_VERSION !== "qualification-v4") return;
+  while (true) {
+    const reference = await readChainTimeReference(client, state, timeReferenceLabel);
+    if (!instruction.ready_at || reference.chainNow >= Number(instruction.ready_at)) return reference;
+    console.log(`WAITING_FOR_CHALLENGE_WINDOW=${instruction.ready_at}`);
+    await sleep(POLL_MS);
+    instruction = asRecord(await read(client, state.core!, "get_settlement_instruction", [instruction.intent_id]));
+    if (instruction.status === "CHALLENGE_BLOCKED" || instruction.oldest_open_challenge) throw new Error("Settlement is blocked by an unresolved qualifying challenge");
   }
 }
 export function inspectResults(receipt: any) {
@@ -570,7 +641,7 @@ async function reconcileExistingCompletedReadOnly(client: any, step: Step, expec
   if (status !== "FINALIZED") throw new Error(`Completed checkpoint ${step.label} is not finalized: ${status || "UNKNOWN"}`);
   const observation = inspectResults(receipt);
   if (observation.executionResult === "ERROR") throw new Error(`Completed checkpoint ${step.label} reconciled to execution ERROR`);
-  if (observation.executionResult === "UNKNOWN" && expectedState) await expectedState();
+  if (expectedState) await expectedState();
   return {receipt, ...observation};
 }
 async function reconcileExistingFailedReadOnly(client: any, step: Step) {
@@ -599,6 +670,8 @@ async function executeStep(config: {abi: any; client: any; account: any; state: 
     proof = calldataProof(abi, functionName, args);
     if (calldataValidator) proof = calldataValidator(abi, args);
     await precondition();
+    state.observations.currentPhase = qualificationPhaseForLabel(label);
+    state.observations.currentStep = label;
     tx = String(await RPC_SCHEDULER.enqueue(`write:${label}`, () => client.writeContract({address: targetFor(label, core, vault), functionName, args, value, account}), false));
     const entry: Step = {label, tx, status: "SUBMITTED"};
     state.steps[label] = entry;
@@ -617,9 +690,22 @@ async function executeStep(config: {abi: any; client: any; account: any; state: 
     writeArtifact("last-lifecycle-step.json", state.steps[label]);
     throw error;
   }
-  const rb = await readback();
+  let rb: any;
+  try {
+    rb = await readback();
+    if (expectedState) await expectedState();
+  } catch (error: any) {
+    state.steps[label] = {...state.steps[label], label, tx, status: "ERROR", error: `Finalized transaction postcondition failed: ${String(error?.message ?? error)}`};
+    recordFailed(state, state.steps[label]);
+    saveState(state);
+    appendTransaction({kind: label, tx, status: "ERROR", executionResult: result.executionResult, error: state.steps[label].error});
+    writeArtifact("last-lifecycle-step.json", state.steps[label]);
+    throw error;
+  }
   state.steps[label] = {...state.steps[label], label, tx, status: "COMPLETE", execution: result.executionResult, executionResult: result.executionResult, outcome: result.outcome, lifecycle: result.lifecycle, readback: rb};
   recordCompleted(state, state.steps[label]);
+  state.observations.lastCompletedPhase = qualificationPhaseForLabel(label);
+  state.observations.lastCompletedStep = label;
   saveState(state);
   appendTransaction({kind: label, tx, method: functionName, args: summary, status: result.receipt.statusName, lifecycle: result.lifecycle, consensusStatus: result.consensusStatus, consensusResult: result.consensusResult, executionResult: result.executionResult, executionResultSource: result.executionResultSource, reconciliationOutcome: result.outcome, receipt: result.receipt, readback: rb});
   writeArtifact("last-lifecycle-step.json", state.steps[label]);
@@ -899,18 +985,26 @@ async function evidenceReadback(client: any, core: string, intentId: string, seq
   const snapshot = snapshotId ? await read(client, core, "get_snapshot", [snapshotId]) : "";
   return {intent, evidence, snapshot};
 }
-async function simulateUnassessed(client: any, vault: string, account: any, intentId: string) {
-  try {
-    const value = await RPC_SCHEDULER.enqueue("simulate:unassessed-reserve", () => client.simulateWriteContract({address: vault, functionName: "reserve", args: [intentId], account}), true);
-    if (value !== undefined) throw new Error("unassessed reservation simulation unexpectedly succeeded");
-  } catch (error: any) {
-    const message = String(error?.message ?? error);
-    if (message.includes("unexpectedly succeeded")) throw error;
-    const proof = {intentId, result: "DETERMINISTIC_REJECTION", error: message, noTransactionSubmitted: true};
-    writeArtifact("unassessed-not-cleared-live-proof.json", proof);
+async function proveUnassessedReadOnly(client: any, core: string, intentId: string) {
+  const rawIntent = await read(client, core, "get_intent", [intentId]);
+  if (asText(rawIntent) === "") {
+    const proof = {intentId, intentState: "NO_RECORD", authorizationState: "NO_AUTHORIZATION_RECORD", result: "UNASSESSED_NOT_CLEARED", noTransactionSubmitted: true, basis: "Core exposes no authorization for an absent Intent"};
+    writeArtifact("unassessed-not-cleared-proof.json", proof);
     return proof;
   }
-  throw new Error("Unassessed reservation simulation unexpectedly succeeded");
+  const item = asRecord(rawIntent);
+  if (!["DRAFT", "SUBMITTED", "EVIDENCE_READY", "AUTHORIZATION_PENDING", "AUTHORIZATION_RETRY_REQUIRED"].includes(item.status)) throw new Error(`Unassessed proof target ${intentId} is not in an unassessed state: ${item.status}`);
+  let authorizationError = "";
+  try {
+    const authorization = await read(client, core, "get_authorization_for_vault", [intentId]);
+    if (asText(authorization) !== "") throw new Error(`Unassessed proof target ${intentId} unexpectedly exposes authorization`);
+  } catch (error: any) {
+    authorizationError = String(error?.message ?? error);
+    if (!/no authorization|authorization record|record does not exist/i.test(authorizationError)) throw error;
+  }
+  const proof = {intentId, intentState: item.status, authorizationState: "NO_AUTHORIZATION_RECORD", result: "UNASSESSED_NOT_CLEARED", authorizationError, noTransactionSubmitted: true, basis: "Core authorization view is absent/rejects until explicit semantic authorization"};
+  writeArtifact("unassessed-not-cleared-proof.json", proof);
+  return proof;
 }
 
 function hasHistoricalSealFailure(state: State) {
@@ -942,7 +1036,10 @@ async function main() {
   let fixture = fixtureWithDefaults(readFixture());
   if (sha256File(CORE_SOURCE) !== CORE_SHA || sha256File(VAULT_SOURCE) !== VAULT_SHA) throw new Error(`Frozen ${QUALIFICATION_VERSION} source hashes do not match current contract source`);
   if (chains.studionet.id !== CHAIN_ID || chains.studionet.rpcUrls.default.http[0] !== RPC) throw new Error("Pinned SDK Studionet configuration mismatch");
-  if (nowSeconds() >= Number(fixture.expiresAt)) throw new Error(`${QUALIFICATION_VERSION} fixture has expired`);
+  // V4's source-of-truth clock is Studionet chain time read from finalized
+  // transaction state. Do not reject a resumed sealed mandate using the
+  // fixture's historical wall-clock validity values.
+  if (QUALIFICATION_VERSION !== "qualification-v4" && nowSeconds() >= Number(fixture.expiresAt)) throw new Error(`${QUALIFICATION_VERSION} fixture has expired`);
   const state = loadState();
   const readClient = createClient({chain: chains.studionet, endpoint: RPC, account: EXPECTED_SIGNER});
   if (await RPC_SCHEDULER.enqueue("chain-id", () => readClient.getChainId(), true) !== CHAIN_ID) throw new Error("RPC is not Studionet 61999");
@@ -1087,6 +1184,7 @@ async function main() {
       mandate = asRecord(await read(client, core, "get_mandate", ["M-1"]));
     }
     if (!Object.keys(mandate).length) throw new Error("M-1 was not created");
+    if (mandate.status === "SEALED" || (mandate.status === "DRAFT" && asText(mandate.title) !== "")) fixture = syncFixtureValidityFromMandate(fixture, mandate);
     if (QUALIFICATION_VERSION === "qualification-v4" && recoveryPlan && mandate.status === "DRAFT" && asText(mandate.title) !== "") {
       // This is intentionally the last read-only timing calculation before the
       // configure broadcast. It never waits for valid_from.
@@ -1094,6 +1192,7 @@ async function main() {
       const args = mandateConfigurationArgs(fixture);
       await executeStep({abi, client, account, state, core, vault, label: recoveryPlan.configureLabel, functionName: "configure_mandate", args, summary: [{type: "string", value: "M-1"}, {type: "policy", value: `${QUALIFICATION_VERSION}-jit-recovery`}, {type: "validity", validFrom: fixture.validFrom, expiresAt: fixture.expiresAt}], precondition: async () => { const item = asRecord(await read(client, core, "get_mandate", ["M-1"])); if (item.status !== "DRAFT" || asText(item.title) === "") throw new Error("M-1 recovery reconfiguration precondition failed"); }, readback: async () => read(client, core, "get_mandate", ["M-1"]), expectedState: async () => read(client, core, "get_mandate", ["M-1"]) });
       mandate = asRecord(await read(client, core, "get_mandate", ["M-1"]));
+      fixture = syncFixtureValidityFromMandate(fixture, mandate);
     }
     if (mandate.status === "DRAFT" && asText(mandate.title) === "") {
       if (QUALIFICATION_VERSION === "qualification-v4") {
@@ -1133,7 +1232,10 @@ async function main() {
       mandate = asRecord(await read(client, core, "get_mandate", ["M-1"]));
     }
     assertMandate(mandate, fixture, "SEALED");
-    await waitForMandateActivation(client, state, mandate, recoveryPlan?.sealLabel ?? "");
+    const activeSealLabel = recoveryPlan?.sealLabel ?? Object.keys(state.steps).reverse().find((candidate) => candidate.startsWith("core:seal_mandate") && state.steps[candidate]?.tx) ?? "";
+    await waitForMandateActivation(client, state, mandate, activeSealLabel);
+    const lifecycleTimeReference = QUALIFICATION_VERSION === "qualification-v4" ? await readChainTimeReference(client, state, activeSealLabel) : {chainNow: nowSeconds(), observedLatency: 0, sourceTx: state.steps[activeSealLabel]?.tx ?? ""};
+    const lifecycleChainNow = lifecycleTimeReference.chainNow;
 
     let counterparty = asRecord(await read(client, core, "get_counterparty", ["C-1"]));
     if (!Object.keys(counterparty).length) {
@@ -1148,68 +1250,76 @@ async function main() {
     if (!sameAddress(counterparty.bound_wallet, EXPECTED_SIGNER) || counterparty.authority_origin !== fixture.evidenceAuthority || counterparty.label !== fixture.counterpartyLabel || counterparty.active !== true) throw new Error("Counterparty identity readback mismatch");
 
     const beforeAccounting = assertAccounting(await read(client, vault, "get_accounting", ["M-1"]), "Pre-deposit mandate");
+    if (BigInt(beforeAccounting.deposited) > 1n) throw new Error("Qualification deposit account already contains more than the exact one-GEN amount");
     if (BigInt(beforeAccounting.deposited) < 1n) {
-      const deposit = await executeStep({abi, client, account, state, core, vault, label: "vault:deposit", functionName: "deposit", args: ["M-1"], summary: [{type: "string", value: "M-1"}], value: 1n, precondition: async () => { const item = assertAccounting(await read(client, vault, "get_accounting", ["M-1"]), "Deposit precondition"); if (BigInt(item.deposited) !== BigInt(beforeAccounting.deposited)) throw new Error("Deposit precondition changed"); }, readback: async () => read(client, vault, "get_accounting", ["M-1"]), expectedState: async () => read(client, vault, "get_accounting", ["M-1"])});
+      const deposit = await executeStep({abi, client, account, state, core, vault, label: "vault:deposit", functionName: "deposit", args: ["M-1"], summary: [{type: "string", value: "M-1"}, {type: "native_value", value: "1"}], value: 1n, precondition: async () => { const mandateItem = asRecord(await read(client, core, "get_mandate", ["M-1"])); if (mandateItem.status !== "SEALED" || !sameAddress(mandateItem.principal, EXPECTED_SIGNER)) throw new Error("Deposit requires the sealed M-1 principal"); const item = assertAccounting(await read(client, vault, "get_accounting", ["M-1"]), "Deposit precondition"); if (BigInt(item.deposited) !== BigInt(beforeAccounting.deposited)) throw new Error("Deposit precondition changed"); }, readback: async () => read(client, vault, "get_accounting", ["M-1"]), expectedState: async () => { const item = assertAccounting(await read(client, vault, "get_accounting", ["M-1"]), "Deposit postcondition"); if (BigInt(item.deposited) !== 1n || BigInt(item.available) !== 1n) throw new Error("Finalized deposit did not produce exactly one available GEN"); return item; }});
       const after = assertAccounting(deposit.readback, "Post-deposit mandate");
       if (BigInt(after.deposited) !== BigInt(beforeAccounting.deposited) + 1n || BigInt(after.available) !== BigInt(beforeAccounting.available) + 1n) throw new Error("Deposit accounting delta is not exactly one GEN");
+      assertGlobalMatchesMandate(assertAccounting(await read(client, vault, "get_global_accounting"), "Post-deposit global"), after, "Post-deposit");
     }
 
-    const intentExpiresAt = Math.min(Number(fixture.expiresAt), nowSeconds() + 3600);
+    const intentExpiresAt = Math.min(Number(fixture.expiresAt), lifecycleChainNow + 3600);
+    if (intentExpiresAt <= lifecycleChainNow) throw new Error(`Intent validity cannot be prepared from chain time ${lifecycleChainNow}`);
     let intent = asRecord(await read(client, core, "get_intent", ["I-1"]));
     if (!Object.keys(intent).length) {
       const args = ["M-1", "C-1", address(CalldataAddress, EXPECTED_SIGNER), 1n, `${QUALIFICATION_VERSION} purchase`, fixture.purpose, fixture.deliverable, fixture.commercialTerms, fixture.fulfillmentCriteria, BigInt(intentExpiresAt)];
-      await executeStep({abi, client, account, state, core, vault, label: "core:create_intent:positive", functionName: "create_intent", args, summary: [{type: "string", value: "M-1"}, {type: "string", value: "C-1"}, {type: "Address", value: EXPECTED_SIGNER}, {type: "u256", value: "1"}], precondition: async () => {}, readback: async () => read(client, core, "get_intent", ["I-1"]), expectedState: async () => read(client, core, "get_intent", ["I-1"])});
+      await executeStep({abi, client, account, state, core, vault, label: "core:create_intent:positive", functionName: "create_intent", args, summary: [{type: "string", value: "M-1"}, {type: "string", value: "C-1"}, {type: "Address", value: EXPECTED_SIGNER}, {type: "u256", value: "1"}], calldataValidator: assertCreateIntentCalldataRoundTrip, precondition: async () => { if (mandate.status !== "SEALED" || lifecycleChainNow < Number(mandate.valid_from) || lifecycleChainNow >= Number(mandate.expires_at)) throw new Error("Create Intent requires an active sealed M-1"); if (!sameAddress(counterparty.bound_wallet, EXPECTED_SIGNER) || counterparty.authority_origin !== fixture.evidenceAuthority || counterparty.active !== true) throw new Error("Create Intent counterparty precondition is not satisfied"); if (1n > BigInt(mandate.maximum_single_transaction) || 1n > BigInt(mandate.epoch_budget) || 1n > BigInt(mandate.total_budget)) throw new Error("Create Intent one-GEN amount exceeds a deterministic mandate budget"); if (intentExpiresAt <= lifecycleChainNow || intentExpiresAt > Number(mandate.expires_at)) throw new Error("Create Intent expiration is outside the active mandate window"); }, readback: async () => read(client, core, "get_intent", ["I-1"]), expectedState: async () => { const item = asRecord(await read(client, core, "get_intent", ["I-1"])); if (item.intent_id !== "I-1" || item.status !== "DRAFT" || item.mandate_id !== "M-1" || item.counterparty_identity_id !== "C-1" || !sameAddress(item.recipient, EXPECTED_SIGNER) || item.amount !== "1") throw new Error("Create Intent postcondition mismatch"); return item; }});
       intent = asRecord(await read(client, core, "get_intent", ["I-1"]));
     }
     assertIntent(intent, fixture);
-    if (intent.status === "DRAFT") { await executeStep({abi, client, account, state, core, vault, label: "core:submit_intent:positive", functionName: "submit_intent", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => {}, readback: async () => read(client, core, "get_intent", ["I-1"]), expectedState: async () => read(client, core, "get_intent", ["I-1"])}); intent = asRecord(await read(client, core, "get_intent", ["I-1"])); }
+    if (intent.status === "DRAFT") { await executeStep({abi, client, account, state, core, vault, label: "core:submit_intent:positive", functionName: "submit_intent", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => { const item = asRecord(await read(client, core, "get_intent", ["I-1"])); if (item.status !== "DRAFT" || lifecycleChainNow >= Number(item.expires_at)) throw new Error("Submit Intent precondition is not an unexpired draft"); }, readback: async () => read(client, core, "get_intent", ["I-1"]), expectedState: async () => { const item = asRecord(await read(client, core, "get_intent", ["I-1"])); if (item.status !== "SUBMITTED" || String(item.intent_fingerprint ?? "").length !== 64) throw new Error("Submit Intent postcondition mismatch"); return item; }}); intent = asRecord(await read(client, core, "get_intent", ["I-1"])); }
 
     if (["SUBMITTED", "EVIDENCE_RETRY_REQUIRED", "EVIDENCE_RECOVERY_REQUIRED", "EVIDENCE_REPAIR_REQUIRED"].includes(intent.status) && asText(await read(client, core, "get_evidence", ["I-1", 0n])) === "") {
-      await executeStep({abi, client, account, state, core, vault, label: "core:define_evidence:authorization", functionName: "define_evidence", args: ["I-1", "PRODUCT_SERVICE", fixture.evidenceTransportUrl, fixture.evidenceAuthority, "", 0n, fixture.evidenceAuthority, 0n], summary: [{type: "evidence", kind: "PRODUCT_SERVICE", authority: fixture.evidenceAuthority, transport: fixture.evidenceTransportUrl}], precondition: async () => { assertEvidenceTransport(fixture.evidenceTransportUrl, fixture.evidenceAuthority); }, readback: async () => read(client, core, "get_evidence", ["I-1", 0n]), expectedState: async () => read(client, core, "get_evidence", ["I-1", 0n])});
+      await executeStep({abi, client, account, state, core, vault, label: "core:define_evidence:authorization", functionName: "define_evidence", args: ["I-1", "PRODUCT_SERVICE", fixture.evidenceTransportUrl, fixture.evidenceAuthority, "", 0n, fixture.evidenceAuthority, 0n], summary: [{type: "evidence", kind: "PRODUCT_SERVICE", authority: fixture.evidenceAuthority, transport: fixture.evidenceTransportUrl}], precondition: async () => { assertEvidenceTransport(fixture.evidenceTransportUrl, fixture.evidenceAuthority); }, readback: async () => read(client, core, "get_evidence", ["I-1", 0n]), expectedState: async () => assertEvidenceDefinition(asRecord(await read(client, core, "get_evidence", ["I-1", 0n])), "PRODUCT_SERVICE", "0", fixture)});
     }
     intent = asRecord(await read(client, core, "get_intent", ["I-1"]));
-    if (["SUBMITTED", "EVIDENCE_RETRY_REQUIRED", "EVIDENCE_RECOVERY_REQUIRED", "EVIDENCE_REPAIR_REQUIRED"].includes(intent.status)) { await executeStep({abi, client, account, state, core, vault, label: "core:stage_evidence:authorization", functionName: "stage_evidence", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => {}, readback: async () => evidenceReadback(client, core, "I-1", 0n), expectedState: async () => evidenceReadback(client, core, "I-1", 0n)}); intent = asRecord(await read(client, core, "get_intent", ["I-1"])); }
-    if (intent.status === "EVIDENCE_READY") { await executeStep({abi, client, account, state, core, vault, label: "core:authorize_intent", functionName: "authorize_intent", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => {}, readback: async () => read(client, core, "get_intent", ["I-1"]), expectedState: async () => read(client, core, "get_intent", ["I-1"])}); intent = asRecord(await read(client, core, "get_intent", ["I-1"])); }
+    if (["SUBMITTED", "EVIDENCE_RETRY_REQUIRED", "EVIDENCE_RECOVERY_REQUIRED", "EVIDENCE_REPAIR_REQUIRED"].includes(intent.status)) { await executeStep({abi, client, account, state, core, vault, label: "core:stage_evidence:authorization", functionName: "stage_evidence", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => {}, readback: async () => evidenceReadback(client, core, "I-1", 0n), expectedState: async () => { const item = asRecord(await read(client, core, "get_intent", ["I-1"])); if (item.status !== "EVIDENCE_READY") throw new Error(`Authorization evidence did not become EVIDENCE_READY: ${item.status}`); return evidenceReadback(client, core, "I-1", 0n); }}); intent = asRecord(await read(client, core, "get_intent", ["I-1"])); }
+    if (intent.status === "EVIDENCE_READY") { await executeStep({abi, client, account, state, core, vault, label: "core:authorize_intent", functionName: "authorize_intent", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => { const item = asRecord(await read(client, core, "get_intent", ["I-1"])); if (item.status !== "EVIDENCE_READY") throw new Error("Authorization requires authenticated evidence"); }, readback: async () => read(client, core, "get_intent", ["I-1"]), expectedState: async () => { const item = asRecord(await read(client, core, "get_intent", ["I-1"])); if (item.status !== "AUTHORIZED" || asRecord(item.authorization).decision !== "AUTHORIZED") throw new Error(`Intent authorization postcondition failed: ${item.status}`); return item; }}); intent = asRecord(await read(client, core, "get_intent", ["I-1"])); }
     const authorization = asRecord(intent.authorization);
     writeArtifact("authorization-vector.json", {intentId: "I-1", status: intent.status, result: intent.authorization_decision ?? authorization.decision ?? "", vector: authorization.vector ?? {}, fullAuthorization: authorization});
     if (intent.status !== "AUTHORIZED") throw new Error(`Positive Intent did not authorize; status=${intent.status}; error=${intent.last_error ?? ""}`);
 
     let reservation = asText(await read(client, vault, "get_reservation", ["I-1"]));
-    if (!reservation) { await executeStep({abi, client, account, state, core, vault, label: "vault:reserve:positive", functionName: "reserve", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => { const auth = asRecord(await read(client, core, "get_authorization_for_vault", ["I-1"])); if (auth.authorization_decision !== "AUTHORIZED") throw new Error("Vault reserve precondition is not authorized"); }, readback: async () => read(client, vault, "get_reservation", ["I-1"]), expectedState: async () => read(client, vault, "get_reservation", ["I-1"])}); reservation = asText(await read(client, vault, "get_reservation", ["I-1"])); }
+    if (!reservation) { await executeStep({abi, client, account, state, core, vault, label: "vault:reserve:positive", functionName: "reserve", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => { const auth = asRecord(await read(client, core, "get_authorization_for_vault", ["I-1"])); if (auth.authorization_decision !== "AUTHORIZED") throw new Error("Vault reserve precondition is not authorized"); }, readback: async () => read(client, vault, "get_reservation", ["I-1"]), expectedState: async () => { const item = asRecord(await read(client, vault, "get_reservation", ["I-1"])); if (item.status !== "RESERVED" || item.intent_id !== "I-1" || item.mandate_id !== "M-1" || item.amount !== "1" || !sameAddress(item.recipient, EXPECTED_SIGNER) || item.settlement_id !== "") throw new Error("Vault reservation postcondition mismatch"); return item; }}); reservation = asText(await read(client, vault, "get_reservation", ["I-1"])); }
     const reservationItem = asRecord(reservation); if (reservationItem.status !== "RESERVED" || reservationItem.intent_id !== "I-1" || reservationItem.mandate_id !== "M-1" || reservationItem.amount !== "1" || !sameAddress(reservationItem.recipient, EXPECTED_SIGNER)) throw new Error("Positive reservation readback mismatch");
+    assertGlobalMatchesMandate(assertAccounting(await read(client, vault, "get_global_accounting"), "Post-reservation global"), assertAccounting(await read(client, vault, "get_accounting", ["M-1"]), "Post-reservation mandate"), "Post-reservation");
 
-    let intent2 = asRecord(await read(client, core, "get_intent", ["I-2"]));
-    if (!Object.keys(intent2).length) { const args = ["M-1", "C-1", address(CalldataAddress, EXPECTED_SIGNER), 1n, `${QUALIFICATION_VERSION} unassessed proof`, fixture.purpose, fixture.deliverable, fixture.commercialTerms, fixture.fulfillmentCriteria, BigInt(intentExpiresAt)]; await executeStep({abi, client, account, state, core, vault, label: "core:create_intent:unassessed", functionName: "create_intent", args, summary: [{type: "intent", id: "I-2", state: "DRAFT"}], precondition: async () => {}, readback: async () => read(client, core, "get_intent", ["I-2"]), expectedState: async () => read(client, core, "get_intent", ["I-2"])}); intent2 = asRecord(await read(client, core, "get_intent", ["I-2"])); }
-    if (intent2.status === "DRAFT") { await executeStep({abi, client, account, state, core, vault, label: "core:submit_intent:unassessed", functionName: "submit_intent", args: ["I-2"], summary: [{type: "string", value: "I-2"}], precondition: async () => {}, readback: async () => read(client, core, "get_intent", ["I-2"]), expectedState: async () => read(client, core, "get_intent", ["I-2"])}); intent2 = asRecord(await read(client, core, "get_intent", ["I-2"])); }
-    const unassessedProof = await simulateUnassessed(client, vault, account, "I-2");
+    const unassessedProof = await proveUnassessedReadOnly(client, core, "I-2");
 
     intent = asRecord(await read(client, core, "get_intent", ["I-1"]));
-    if (intent.status === "AUTHORIZED") { await executeStep({abi, client, account, state, core, vault, label: "core:start_fulfillment", functionName: "start_fulfillment", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => { if (asRecord(await read(client, vault, "get_reservation", ["I-1"])).status !== "RESERVED") throw new Error("Fulfillment requires RESERVED state"); }, readback: async () => read(client, core, "get_intent", ["I-1"]), expectedState: async () => read(client, core, "get_intent", ["I-1"])}); intent = asRecord(await read(client, core, "get_intent", ["I-1"])); }
-    if (intent.status === "FULFILLMENT_PENDING" && asText(await read(client, core, "get_evidence", ["I-1", 1n])) === "") await executeStep({abi, client, account, state, core, vault, label: "core:define_evidence:fulfillment", functionName: "define_evidence", args: ["I-1", "FULFILLMENT", fixture.evidenceTransportUrl, fixture.evidenceAuthority, "", 0n, fixture.evidenceAuthority, 1n], summary: [{type: "evidence", kind: "FULFILLMENT", authority: fixture.evidenceAuthority, transport: fixture.evidenceTransportUrl}], precondition: async () => { assertEvidenceTransport(fixture.evidenceTransportUrl, fixture.evidenceAuthority); }, readback: async () => read(client, core, "get_evidence", ["I-1", 1n]), expectedState: async () => read(client, core, "get_evidence", ["I-1", 1n])});
-    if (intent.status === "FULFILLMENT_PENDING") { await executeStep({abi, client, account, state, core, vault, label: "core:stage_evidence:fulfillment", functionName: "stage_evidence", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => {}, readback: async () => evidenceReadback(client, core, "I-1", 1n), expectedState: async () => evidenceReadback(client, core, "I-1", 1n)}); await executeStep({abi, client, account, state, core, vault, label: "core:assess_fulfillment", functionName: "assess_fulfillment", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => {}, readback: async () => read(client, core, "get_intent", ["I-1"]), expectedState: async () => read(client, core, "get_intent", ["I-1"])}); intent = asRecord(await read(client, core, "get_intent", ["I-1"])); }
+    if (intent.status === "AUTHORIZED") { await executeStep({abi, client, account, state, core, vault, label: "core:start_fulfillment", functionName: "start_fulfillment", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => { const reservationState = asRecord(await read(client, vault, "get_reservation", ["I-1"])); if (reservationState.status !== "RESERVED" || reservationState.intent_id !== "I-1" || reservationState.amount !== "1") throw new Error("Fulfillment requires the exact RESERVED one-GEN Intent"); }, readback: async () => read(client, core, "get_intent", ["I-1"]), expectedState: async () => { const item = asRecord(await read(client, core, "get_intent", ["I-1"])); if (item.status !== "FULFILLMENT_PENDING") throw new Error(`Fulfillment did not enter pending state: ${item.status}`); return item; }}); intent = asRecord(await read(client, core, "get_intent", ["I-1"])); }
+    if (intent.status === "FULFILLMENT_PENDING" && asText(await read(client, core, "get_evidence", ["I-1", 1n])) === "") await executeStep({abi, client, account, state, core, vault, label: "core:define_evidence:fulfillment", functionName: "define_evidence", args: ["I-1", "FULFILLMENT", fixture.evidenceTransportUrl, fixture.evidenceAuthority, "", 0n, fixture.evidenceAuthority, 1n], summary: [{type: "evidence", kind: "FULFILLMENT", authority: fixture.evidenceAuthority, transport: fixture.evidenceTransportUrl}], precondition: async () => { assertEvidenceTransport(fixture.evidenceTransportUrl, fixture.evidenceAuthority); }, readback: async () => read(client, core, "get_evidence", ["I-1", 1n]), expectedState: async () => assertEvidenceDefinition(asRecord(await read(client, core, "get_evidence", ["I-1", 1n])), "FULFILLMENT", "1", fixture)});
+    if (intent.status === "FULFILLMENT_PENDING") { await executeStep({abi, client, account, state, core, vault, label: "core:stage_evidence:fulfillment", functionName: "stage_evidence", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => {}, readback: async () => evidenceReadback(client, core, "I-1", 1n), expectedState: async () => { const item = asRecord(await read(client, core, "get_intent", ["I-1"])); if (item.status !== "EVIDENCE_READY" && item.status !== "FULFILLMENT_PENDING") throw new Error(`Fulfillment evidence did not stage: ${item.status}`); return evidenceReadback(client, core, "I-1", 1n); }}); await executeStep({abi, client, account, state, core, vault, label: "core:assess_fulfillment", functionName: "assess_fulfillment", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => { const item = asRecord(await read(client, core, "get_intent", ["I-1"])); if (item.status !== "FULFILLMENT_PENDING") throw new Error("Fulfillment assessment requires FULFILLMENT_PENDING"); }, readback: async () => read(client, core, "get_intent", ["I-1"]), expectedState: async () => { const item = asRecord(await read(client, core, "get_intent", ["I-1"])); if (item.status !== "FULFILLED" || item.settlement_direction !== "RELEASE_TO_COUNTERPARTY") throw new Error(`Positive fulfillment postcondition failed: ${item.status}`); return item; }}); intent = asRecord(await read(client, core, "get_intent", ["I-1"])); }
     const fulfillment = asRecord(intent.fulfillment);
     writeArtifact("fulfillment-vector.json", {intentId: "I-1", status: intent.status, result: fulfillment.vector?.outcome ?? "", vector: fulfillment.vector ?? {}, fullFulfillment: fulfillment});
+    if (intent.status !== "FULFILLED" || intent.settlement_direction !== "RELEASE_TO_COUNTERPARTY") throw new Error(`Positive fulfillment did not complete; status=${intent.status}; direction=${intent.settlement_direction ?? ""}`);
     writeArtifact("third-party-challenge-live.json", {status: "BLOCKED_BY_SECOND_SIGNER", note: "No distinct controlled signer was available; no third-party identity was fabricated."});
 
     let settlementTx = "";
     let externalObservation: any = {observation: "NOT_ATTEMPTED"};
     if (intent.status === "FULFILLED" && intent.settlement_direction === "RELEASE_TO_COUNTERPARTY") {
       let instruction = asRecord(await read(client, core, "get_settlement_instruction", ["I-1"]));
-      while (instruction.ready_at && BigInt(instruction.ready_at) > BigInt(nowSeconds())) { console.log(`WAITING_FOR_CHALLENGE_WINDOW=${instruction.ready_at}`); await sleep(POLL_MS); instruction = asRecord(await read(client, core, "get_settlement_instruction", ["I-1"])); }
+      if (instruction.status === "CHALLENGE_BLOCKED" || instruction.oldest_open_challenge) throw new Error("Settlement is blocked by an unresolved qualifying challenge");
+      await waitForSettlementReady(client, state, instruction, activeSealLabel);
       const currentReservation = asRecord(await read(client, vault, "get_reservation", ["I-1"]));
-      if (currentReservation.status === "RESERVED") { const settlement = await executeStep({abi, client, account, state, core, vault, label: "vault:request_release", functionName: "request_release", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => { const current = asRecord(await read(client, core, "get_settlement_instruction", ["I-1"])); if (current.direction !== "RELEASE_TO_COUNTERPARTY" || BigInt(current.ready_at) > BigInt(nowSeconds())) throw new Error("Settlement precondition is not ready"); }, readback: async () => read(client, vault, "get_reservation", ["I-1"]), expectedState: async () => read(client, vault, "get_reservation", ["I-1"])}); settlementTx = settlement.tx; }
+      settlementTx = state.steps["vault:request_release"]?.tx ?? "";
+      if (currentReservation.status === "RESERVED" || state.steps["vault:request_release"]?.tx) { const settlement = await executeStep({abi, client, account, state, core, vault, label: "vault:request_release", functionName: "request_release", args: ["I-1"], summary: [{type: "string", value: "I-1"}], precondition: async () => { const current = asRecord(await read(client, core, "get_settlement_instruction", ["I-1"])); const chainReference = await readChainTimeReference(client, state, activeSealLabel); if (current.status === "CHALLENGE_BLOCKED" || current.oldest_open_challenge || current.direction !== "RELEASE_TO_COUNTERPARTY" || BigInt(current.ready_at) > BigInt(chainReference.chainNow)) throw new Error("Settlement precondition is not ready"); }, readback: async () => read(client, vault, "get_reservation", ["I-1"]), expectedState: async () => { const reservation = asRecord(await read(client, vault, "get_reservation", ["I-1"])); if (reservation.status !== "RELEASE_PENDING" || reservation.settlement_id === "") throw new Error("Vault release postcondition is not RELEASE_PENDING"); return reservation; }}); settlementTx = settlement.tx; }
+      else if (currentReservation.status !== "RELEASE_PENDING") throw new Error(`Settlement cannot proceed from Vault reservation state ${currentReservation.status}`);
+      if (!settlementTx) throw new Error("Release-pending Vault settlement has no checkpointed request transaction");
       let triggered: any[] = []; try { triggered = await RPC_SCHEDULER.enqueue(`triggered:${settlementTx}`, () => client.getTriggeredTransactionIds({hash: settlementTx}), true); } catch (error: any) { externalObservation = {observation: "TRIGGERED_TRANSACTION_QUERY_UNSUPPORTED", error: String(error?.message ?? error)}; }
       if (!externalObservation.error) externalObservation = {observation: triggered.length ? "TRIGGERED_IDS_OBSERVED" : "PARENT_FINALIZED_CHILD_NOT_EXPOSED", triggeredTransactionIds: triggered};
     }
     writeArtifact("external-message-observation.json", {settlementTx: settlementTx || null, ...externalObservation});
     const finalGlobal = assertAccounting(await read(client, vault, "get_global_accounting"), "Final global");
     const finalMandateAccounting = assertAccounting(await read(client, vault, "get_accounting", ["M-1"]), "Final mandate");
+    assertGlobalMatchesMandate(finalGlobal, finalMandateAccounting, "Final");
     const finalIntent = asRecord(await read(client, core, "get_intent", ["I-1"]));
-    const finalUnassessed = asRecord(await read(client, core, "get_intent", ["I-2"]));
-    const finalAccounting = {global: finalGlobal, mandate: finalMandateAccounting, reservation: await read(client, vault, "get_reservation", ["I-1"]), intent: finalIntent, unassessed: finalUnassessed};
+    const finalReservation = asRecord(await read(client, vault, "get_reservation", ["I-1"]));
+    const finalAccounting = {global: finalGlobal, mandate: finalMandateAccounting, reservation: finalReservation, intent: finalIntent, unassessed: unassessedProof};
     writeArtifact("qualification-final-readbacks.json", {core, vault, accounting: finalAccounting, unassessedProof, vectors: {authorization: authorization.vector ?? {}, fulfillment: fulfillment.vector ?? {}}, externalObservation});
-    writeArtifact(RUN_SUMMARY_FILE, {status: "COMPLETED_LIVE_FLOW", core, vault, mandateId: "M-1", positiveIntentId: "I-1", unassessedIntentId: "I-2", rootMandateTx: state.steps["core:create_mandate"]?.tx ?? null, settlementTx: settlementTx || null, thirdPartyChallenge: "BLOCKED_BY_SECOND_SIGNER", finalAccounting, externalObservation});
-    console.log(`${QUALIFICATION_VERSION.toUpperCase().replace(/-/g, "_")}_RUN=COMPLETED_LIVE_FLOW`);
+    const flowStatus = externalObservation.observation === "TRIGGERED_IDS_OBSERVED" ? "COMPLETED_LIVE_FLOW" : "COMPLETED_LIVE_FLOW_EXTERNAL_SETTLEMENT_UNCONFIRMED";
+    writeArtifact(RUN_SUMMARY_FILE, {status: flowStatus, core, vault, mandateId: "M-1", positiveIntentId: "I-1", unassessedIntentId: null, rootMandateTx: state.steps["core:create_mandate"]?.tx ?? null, settlementTx: settlementTx || null, thirdPartyChallenge: "BLOCKED_BY_SECOND_SIGNER", finalAccounting, externalObservation});
+    console.log(`${QUALIFICATION_VERSION.toUpperCase().replace(/-/g, "_")}_RUN=${flowStatus}`);
   } finally {
     password = "";
     signingSecret = "";
