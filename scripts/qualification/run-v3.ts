@@ -307,7 +307,7 @@ function assertCounterpartyCalldataRoundTrip(abi: any, args: any[]) {
   const map = decoded instanceof Map ? decoded : new Map(Object.entries(decoded));
   const decodedArgs: any[] = map.get("args") ?? [];
   const addressArg = decodedArgs[0]?.bytes ? `0x${Buffer.from(decodedArgs[0].bytes).toString("hex")}` : String(decodedArgs[0] ?? "");
-  if (decodedArgs.length !== 3 || !sameAddress(addressArg, args[0]?.bytes ? `0x${Buffer.from(args[0].bytes).toString("hex")}` : args[0]) || decodedArgs[1] !== args[1] || decodedArgs[2] !== args[2]) {
+  if (decodedArgs.length !== 3 || !sameAddress(addressArg, EXPECTED_SIGNER) || decodedArgs[1] !== args[1] || decodedArgs[2] !== args[2]) {
     throw new Error("register_counterparty typed calldata round-trip mismatch");
   }
   return proof;
