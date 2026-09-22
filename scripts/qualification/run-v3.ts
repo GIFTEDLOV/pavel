@@ -252,7 +252,9 @@ async function materializeJustInTimeValidity(client: any, state: State, fixture:
   const observedChainTimestamp = Number(sourceReceipt?.current_timestamp ?? sourceReceipt?.created_timestamp ?? 0);
   if (!Number.isFinite(observedChainTimestamp) || observedChainTimestamp <= 0) throw new Error("Unable to obtain trustworthy finalized chain time for JIT Mandate validity");
   const observedCreatedTimestamp = Number(sourceReceipt?.created_timestamp ?? observedChainTimestamp);
-  const observedLatency = Math.max(0, observedChainTimestamp - observedCreatedTimestamp);
+  const leaderReceipts = Array.isArray(sourceReceipt?.consensus_data?.leader_receipt) ? sourceReceipt.consensus_data.leader_receipt : Array.isArray(sourceReceipt?.leader_receipt) ? sourceReceipt.leader_receipt : [];
+  const processingMs = Number(leaderReceipts.find((item: any) => Number(item?.processing_time) > 0)?.processing_time ?? 0);
+  const observedLatency = processingMs > 0 ? Math.ceil(processingMs / 1000) : Math.min(120, Math.max(0, observedChainTimestamp - observedCreatedTimestamp));
   const derived = deriveJustInTimeValidity(Math.max(observedChainTimestamp, Math.floor(Date.now() / 1000)), observedLatency, Number(fixture.validFrom), Number(fixture.expiresAt));
   const wallObservedAt = Math.floor(Date.now() / 1000);
   const chainNowEstimate = derived.chainNow;
@@ -266,7 +268,7 @@ async function materializeJustInTimeValidity(client: any, state: State, fixture:
     reason,
     original: {validFrom: Number(fixture.validFrom), expiresAt: Number(fixture.expiresAt)},
     corrected: {validFrom: correctedValidFrom, expiresAt: correctedExpiresAt},
-    chainTimeEvidence: {sourceLabel, sourceTx, observedChainTimestamp, observedCreatedTimestamp, observedLatency, wallObservedAt, chainNowEstimate},
+    chainTimeEvidence: {sourceLabel, sourceTx, observedChainTimestamp, observedCreatedTimestamp, currentTimestampAgeSeconds: Math.max(0, observedChainTimestamp - observedCreatedTimestamp), processingMs, observedLatency, latencySource: processingMs > 0 ? "leader_receipt.processing_time" : "bounded_created_timestamp_delta", wallObservedAt, chainNowEstimate},
     timingSafetyMarginSeconds: safetyMargin,
     horizonSeconds: horizon,
     materializedAt: new Date().toISOString(),
