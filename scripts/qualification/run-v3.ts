@@ -353,12 +353,13 @@ async function readChainTimeReference(client: any, state: State, preferredLabel 
   if (!Number.isFinite(observedChainTimestamp) || observedChainTimestamp <= 0) throw new Error("Unable to obtain trustworthy finalized chain time reference");
   const observedCreatedTimestamp = Number(receipt?.created_timestamp ?? observedChainTimestamp);
   const finalizedTimestamp = finalizedMonitoringTimestamp(receipt);
+  const consensusCompletionTimestamp = Number(receipt?.last_vote_timestamp ?? receipt?.timestamp_awaiting_finalization ?? finalizedTimestamp ?? 0);
   const leaderReceipts = Array.isArray(receipt?.consensus_data?.leader_receipt) ? receipt.consensus_data.leader_receipt : Array.isArray(receipt?.leader_receipt) ? receipt.leader_receipt : [];
   const processingMs = Number(leaderReceipts.find((item: any) => Number(item?.processing_time) > 0)?.processing_time ?? 0);
-  const consensusLatency = finalizedTimestamp > 0 && observedCreatedTimestamp > 0 ? Math.max(0, finalizedTimestamp - observedCreatedTimestamp) : 0;
+  const consensusLatency = consensusCompletionTimestamp > 0 && observedCreatedTimestamp > 0 ? Math.max(0, consensusCompletionTimestamp - observedCreatedTimestamp) : 0;
   const processingLatency = processingMs > 0 ? Math.ceil(processingMs / 1000) : 0;
   const observedLatency = Math.max(consensusLatency, processingLatency);
-  return {sourceLabel, sourceTx, receipt, chainNow: Math.floor(observedChainTimestamp), observedCreatedTimestamp, finalizedTimestamp, processingMs, observedLatency, latencySource: consensusLatency > 0 ? "finalized_monitoring_minus_created_timestamp" : processingLatency > 0 ? "leader_receipt.processing_time" : "unavailable"};
+  return {sourceLabel, sourceTx, receipt, chainNow: Math.floor(observedChainTimestamp), observedCreatedTimestamp, finalizedTimestamp, consensusCompletionTimestamp, processingMs, observedLatency, latencySource: consensusLatency > 0 ? "consensus_completion_minus_created_timestamp" : processingLatency > 0 ? "leader_receipt.processing_time" : "unavailable"};
 }
 
 async function materializeJustInTimeValidity(client: any, state: State, fixture: Fixture, reason: string, preferredLabel = "") {
