@@ -30,14 +30,17 @@ cleanup in this pass.
 ## Current repository release
 
 The repository release is the final Git commit after this cleanup, not the
-historical source baseline below. The exact `FINAL_HEAD` is recorded after the
-release commit and tag are created.
+historical source baseline below. The commit containing this provenance record
+is the release source commit; its exact SHA is reported as `FINAL_HEAD` in the
+release audit and anchored by the `v7.0.0` tag.
 
 | Field | Verified value |
 | --- | --- |
 | Repository | <https://github.com/GIFTEDLOV/pavel> |
+| Release tag | `v7.0.0` (final repository HEAD) |
 | Production alias | <https://pavel-nine.vercel.app> |
-| Frontend release | Current `frontend/` source at final repository HEAD |
+| Vercel deployment | `dpl_5Jdc6aZCA3NyWmju4YpYF4zTDAb8` (READY; production) |
+| Frontend release | Current `frontend/` source deployed by the Vercel deployment above |
 | External settlement | `UNCONFIRMED` |
 
 The historical source baseline commit `8e59a99b1b7a83f28716549694df2f6d45ec025e`
