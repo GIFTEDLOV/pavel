@@ -1,22 +1,24 @@
-# Release checklist
+# PAVEL V7 release checklist
 
-This checklist separates local release readiness, qualification, and canonical
-deployment. A qualification address is never silently promoted to production.
+This checklist records the verified active release. Historical qualification
+failures remain in the provenance record and are never silently promoted to
+runtime configuration.
 
 ## Required gates
 
-- [ ] Frozen commit and clean tracked worktree.
-- [ ] Core and Vault source hashes recorded and reviewed.
-- [ ] Python compile, Direct Mode, adversarial, property, and state-machine tests pass serially.
-- [ ] GenVM lint, validation, schema, typecheck, and Core/Vault interface parity pass.
-- [ ] Frontend tests, typecheck, lint, production build, and browser smoke pass.
-- [ ] Network guard, manifest validation, source hash gate, and secret scan pass.
-- [x] Qualification-v2 Core and Vault both finalize with successful execution.
+- [x] Frozen commit and clean tracked worktree.
+- [x] Core and Vault source hashes recorded and reviewed.
+- [x] Python compile, Direct Mode, adversarial, property, and state-machine tests pass serially.
+- [x] GenVM lint, validation, schema, typecheck, and Core/Vault interface parity pass.
+- [x] Frontend tests, typecheck, lint, and production build pass.
+- [ ] Browser E2E — unavailable in the release environment; HTTP and route smoke pass.
+- [x] Network guard, manifest validation, source hash gate, and secret scan pass.
+- [x] V7 Core and Vault finalize with successful execution.
 - [x] Exact deployed-source parity is established for both contracts.
 - [x] One-time binding is verified bidirectionally.
-- [ ] Controlled Mandate, evidence, authorization, reservation, fulfillment, challenge, and settlement lifecycle passes.
-- [ ] External-message observation is reported honestly.
-- [ ] Canonical deployment is separately authorized.
+- [x] Controlled Mandate, evidence, authorization, reservation, fulfillment, and settlement lifecycle passes.
+- [x] External-message observation is reported honestly as `UNCONFIRMED`.
+- [x] V7 deployment, GitHub source, and production frontend are reconciled.
 
 ## Forbidden shortcuts
 

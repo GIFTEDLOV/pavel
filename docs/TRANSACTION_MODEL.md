@@ -6,9 +6,11 @@ PAVEL writes follow:
 
 The frontend uses stable `genlayer-js` `1.1.8`, persists the ID returned by `writeContract`, and reads the same ID with `getTransaction`. In this installed stable SDK, the receipt exposes separate `statusName`, `resultName`, and `txExecutionResultName` fields; PAVEL's local success predicate requires `FINALIZED`, `SUCCESS`, and `FINISHED_WITH_RETURN`. `FINALIZED` and successful execution are separate conditions. Polling failure is `AMBIGUOUS`, not submission failure, and never authorizes a second broadcast.
 
-Phase 1 includes the client abstraction and transaction persistence. Development fee estimation is supported by the SDK surface, but no live fee profile or production submission occurs in this local run. Production UX should use a measured fee profile/Transaction Kit after qualification.
+The active V7 frontend uses this transaction model for the verified Studionet
+application. Fee estimation remains an SDK/tooling concern; a finalized parent
+transaction is never treated as proof that an external recipient was credited.
 
-## Empty-string argument transport
+## HISTORICAL — Empty-string argument transport
 
 Qualification-v2 demonstrated two independent pinned-CLI hazards. A
 standalone empty PowerShell/native argv token disappeared before invocation in

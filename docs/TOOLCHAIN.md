@@ -19,7 +19,7 @@ Selected stable Studionet family:
 
 The stable header and Direct Mode runner are not mixed with Consensus v0.6 RC tooling. Stable hosted Studionet is `https://studio.genlayer.com/api`, chain ID `61999`; `studio-dev`/`61997` is forbidden by the network guard.
 
-## Phase 1.5 cache repair
+## HISTORICAL — Phase 1.5 cache repair
 
 The corrupted artifact was exactly:
 

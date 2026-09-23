@@ -1,11 +1,28 @@
-# Deployment
+# PAVEL deployment
 
-The V7 chain qualification deployment is source-verified and is the current
-runtime configuration target. Public frontend hosting is tracked separately
-because this repository has no configured Git remote or identifiable PAVEL
-hosting project.
+The active PAVEL release is V7 on Studionet. The public source, application,
+and runtime configuration are intentionally separate from all other projects.
 
-## V6 migration boundary
+| Field | Current value |
+| --- | --- |
+| GitHub | <https://github.com/GIFTEDLOV/pavel> |
+| Production application | <https://pavel-nine.vercel.app> |
+| Network | Studionet |
+| Chain ID | `61999` |
+| RPC | `https://studio.genlayer.com/api` |
+| Core | `0xBA2356FfE5062506FA938da4715c03a2BE7929bF` |
+| Vault | `0x552167Cc0883D02ce42fA2aD64E29Cd10EE3eDFD` |
+| Core SHA-256 | `4acc04c4b684b35058b793973eec75569af9e981eb84d33167198615255b785a` |
+| Vault SHA-256 | `f671005e07a658a17a7711807d23fa56bf0d6e2e85d0a266eafc17b03455f15c` |
+
+The V7 pair is source-parity verified and bidirectionally bound. The hosted
+qualification lifecycle reached canonical `FULFILLED` and
+`RELEASE_PENDING`; accounting is conserved and external settlement remains
+`UNCONFIRMED`. No document in this repository treats that state as paid.
+
+## Qualification and migration notes
+
+### HISTORICAL — V6 migration boundary
 
 V6 changes Core's consensus schema to `pavel-authorization-v2`; it therefore
 requires a new Core deployment. Vault's `core_address` is constructor-set and
@@ -32,7 +49,7 @@ address through the stable CLI address-calldata path. The Vault account is
 locked, so no deployment command is executed by automation without a secure
 existing signing session.
 
-## V7 live qualification
+### V7 lifecycle provenance
 
 The current source-verified V7 qualification pair is on stable Studionet
 (chain 61999):
@@ -48,10 +65,7 @@ settlement record correctly remains `UNCONFIRMED` until an external
 observation exists. V5/V6 reservations remain historical and are not counted
 or migrated into V7.
 
-The repository has no configured Git remote or identifiable PAVEL production
-hosting project, so no public repository or hosted frontend URL is claimed.
-
-## V6 fulfillment loss boundary
+### HISTORICAL — V6 fulfillment loss boundary
 
 The preserved V6 qualification records I-2 and I-3 as `AUTHORIZED` with a
 canonical `RESERVED` one-unit reservation each, followed by unresolved

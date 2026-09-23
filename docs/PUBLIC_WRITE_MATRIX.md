@@ -1,6 +1,7 @@
 # PAVEL public write matrix
 
-This is the Phase 1.5 audit inventory. The current V7 source exposes 24 Core
+This is the current V7 public-write audit inventory. The V1–V6 records are
+historical; the current V7 source exposes 24 Core
 writes and 5 Vault writes. A caller is never trusted for economic values:
 Core freezes them and Vault rereads them synchronously through typed views.
 `N/A` in the nondeterministic column means the transition is deterministic.

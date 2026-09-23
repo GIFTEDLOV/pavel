@@ -1,16 +1,32 @@
-# Submission package
+# PAVEL submission
 
-PAVEL is prepared as a local protocol submission package. Public links are
-intentionally placeholders until canonical deployment and hosting are
-explicitly authorized.
+PAVEL is a GenLayer application for policy-bounded agent authority,
+authenticated evidence, deterministic GEN custody, and settlement-aware
+fulfillment.
 
-- Repository: `[public repository link - not yet created]`
-- Application: `[PAVEL production hosting target not configured]`
-- Canonical Core qualification: `0xBA2356FfE5062506FA938da4715c03a2BE7929bF`
-- Canonical Vault qualification: `0x552167Cc0883D02ce42fA2aD64E29Cd10EE3eDFD`
-- Explorer proof: `https://explorer-studio.genlayer.com`
+- Repository: <https://github.com/GIFTEDLOV/pavel>
+- Live application: <https://pavel-nine.vercel.app>
+- Network: Studionet (`61999`)
+- RPC: <https://studio.genlayer.com/api>
+- Core: `0xBA2356FfE5062506FA938da4715c03a2BE7929bF`
+- Vault: `0x552167Cc0883D02ce42fA2aD64E29Cd10EE3eDFD`
+- Explorer: <https://explorer-studio.genlayer.com>
 
-The qualification-v1 through V6 failure/history records and the V7
-source-verification trail are retained locally under versioned artifacts. V7
-is a verified Studionet qualification deployment; no public hosting URL is
-claimed until the intended PAVEL production project is identified.
+## Verified V7 lifecycle
+
+The source-verified V7 pair completed a clean hosted lifecycle through
+canonical authorization, reservation, full-content fulfillment, and a
+Core-directed release request. The current canonical state is:
+
+```text
+Mandate: SEALED
+Authorization: AUTHORIZED
+Reservation: RESERVED → released to RELEASE_PENDING
+Fulfillment: FULFILLED
+Settlement: RELEASE_PENDING
+Accounting: CONSERVED
+External transfer: UNCONFIRMED
+```
+
+`RELEASE_PENDING` is not presented as external payment completion. V1–V6
+qualification failures remain preserved as historical provenance.

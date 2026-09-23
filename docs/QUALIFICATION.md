@@ -4,7 +4,33 @@ Qualification must run Python compile checks, Direct Mode, property/invariant te
 
 Studio/Studionet qualification is a separate explicit stage. It must use stable Studionet chain `61999` and the exact source manifest produced by the final local commit. It must not be inferred from Direct Mode or from an accepted-but-unsuccessful transaction.
 
-## Phase 2A live constructor finding
+## CURRENT ACTIVE QUALIFICATION: V7
+
+| Field | Current verified value |
+| --- | --- |
+| Network | Studionet (`61999`) |
+| Core | `0xBA2356FfE5062506FA938da4715c03a2BE7929bF` |
+| Vault | `0x552167Cc0883D02ce42fA2aD64E29Cd10EE3eDFD` |
+| Core SHA-256 | `4acc04c4b684b35058b793973eec75569af9e981eb84d33167198615255b785a` |
+| Vault SHA-256 | `f671005e07a658a17a7711807d23fa56bf0d6e2e85d0a266eafc17b03455f15c` |
+| Authorization | `pavel-authorization-v2`, canonical `AUTHORIZED` |
+| Fulfillment | `pavel-fulfillment-v2`, canonical `FULFILLED` |
+| Settlement | `RELEASE_PENDING` |
+| Accounting | Conserved |
+| External settlement | `UNCONFIRMED` |
+| Application | <https://pavel-nine.vercel.app> |
+| Repository | <https://github.com/GIFTEDLOV/pavel> |
+
+The V7 hosted lifecycle passed source parity, bidirectional binding,
+authorization, reservation, complete fulfillment evidence, deterministic
+fulfillment checks, semantic fulfillment, and Core-directed settlement
+readback. `RELEASE_PENDING` is not described as external payment completion.
+
+The sections below are the **HISTORICAL QUALIFICATION RECORD** for V1–V6.
+They preserve failed transactions, source findings, and migration boundaries;
+they are not the active deployment configuration.
+
+### HISTORICAL — Phase 2A live constructor finding
 
 The first qualification PavelVault deployment was not successful. Transaction
 `0x2ec844f28396971ea0d8f1eb3f47414dead3ec618c02eb8c307d1753b7f73861` reached
@@ -24,7 +50,7 @@ exercise the stable v0.2.16 runtime type, including zero-address rejection and
 the Core address parameters. No replacement deployment or Core binding was
 performed after the failure.
 
-## Qualification-v2 corrected Core
+### HISTORICAL — Qualification-v2 corrected Core
 
 The corrected source was committed at `e48e851398a11af2f5bf2a9b820003148afd315c`.
 The user-signed Core deployment was:
@@ -80,7 +106,7 @@ registration is required later by `create_intent`. The prepared fixture is
 stored in `artifacts/studionet/qualification-v2/qualification-fixture.json`.
 No canonical production deployment is authorized by this evidence.
 
-## qualification-v2 empty-string calldata finding
+### HISTORICAL — qualification-v2 empty-string calldata finding
 
 The first root-Mandate attempt was intentionally preserved rather than
 replayed. Transaction
@@ -123,7 +149,7 @@ The deployed contract source hash remains unchanged for the historical
 qualification. The local compatibility fix is tracked separately below; the
 next network write is blocked until that fix is explicitly deployed.
 
-## qualification-v2 root transaction reconciliation
+### HISTORICAL — qualification-v2 root transaction reconciliation
 
 The autonomous runner submitted the pinned SDK root call exactly once as
 transaction
@@ -154,7 +180,7 @@ sealed source authority. Required textual fields and recovery URLs remain
 non-empty. The audit is recorded in
 `artifacts/studionet/qualification-v2/empty-string-boundary-audit.json`.
 
-## qualification-v2 address-bound keystore resolution and runner
+### HISTORICAL — qualification-v2 address-bound keystore resolution and runner
 
 The local GenLayer configuration currently marks `agentpact-requester` on
 `studio-dev` as active. That profile is not the qualification signer. The

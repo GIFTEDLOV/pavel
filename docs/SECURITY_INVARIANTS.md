@@ -1,6 +1,7 @@
 # Security invariants
 
-The following are machine-testable targets implemented or exercised in Phase 1:
+The following are machine-testable security invariants implemented or exercised
+by the current V7 source:
 
 1. Sealed Mandate policy fields and definition fingerprint never change through public methods.
 2. A child's transaction cap, epoch budget, total budget, expiry, valid-from, challenge window, and source authorities never exceed parent protection bounds.

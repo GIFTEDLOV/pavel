@@ -16,5 +16,5 @@ def test_core_vault_interface_parity_gate():
     assert "CORE_VAULT_INTERFACE_PARITY: passed" in _run("core-vault-interface-parity.py")
 
 
-def test_undeployed_manifest_honesty_gate():
-    assert "DEPLOYMENT_MANIFEST_HONESTY: passed" in _run("validate-deployment-manifest.py")
+def test_active_v7_manifest_gate():
+    assert "DEPLOYMENT_MANIFEST: passed" in _run("validate-deployment-manifest.py")
