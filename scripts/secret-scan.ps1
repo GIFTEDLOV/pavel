@@ -26,6 +26,16 @@ $excludedGlobs = @(
 )
 
 function Write-SafeMatch([string]$file, [int]$lineNumber, [string]$line) {
+    $normalizedFile = $file -replace '^\.\\', ''
+    $normalizedLine = $line.Trim()
+    # These two exact README lines explain secret-handling rules. They contain
+    # detector vocabulary but no credential value; all other README content is
+    # still scanned normally.
+    $allowlistedDocumentation = $normalizedFile -eq 'README.md' -and $normalizedLine -in @(
+        'Public reads do not require a wallet. Never place private keys, keystore',
+        'passwords, seed phrases, or API tokens in `.env.example` or tracked files.'
+    )
+    if ($allowlistedDocumentation) { return }
     foreach ($match in [regex]::Matches($line, $pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)) {
         # Emit only file, line, and detector token. Never emit the containing line.
         Write-Output ("{0}:{1}:{2}" -f $file, $lineNumber, $match.Value)
@@ -36,7 +46,7 @@ $rg = Get-Command rg.exe -ErrorAction SilentlyContinue
 if ($null -ne $rg) {
     Push-Location $root
     try {
-        $rgArguments = @('-n', '-i', '--only-matching', '--hidden')
+        $rgArguments = @('-n', '-i', '--hidden')
         foreach ($glob in $excludedGlobs) { $rgArguments += @('--glob', $glob) }
         $rgArguments += @($pattern, '.')
         $output = & $rg.Source @rgArguments
@@ -45,8 +55,18 @@ if ($null -ne $rg) {
         Pop-Location
     }
     if ($rgExitCode -eq 0) {
-        $output
-        exit 1
+        $safeMatches = @()
+        foreach ($matchLine in @($output)) {
+            if ($matchLine -match '^(.*?):(\d+):(.*)$') {
+                $safeMatches += @(Write-SafeMatch $Matches[1] ([int]$Matches[2]) $Matches[3])
+            }
+        }
+        if ($safeMatches.Count -gt 0) {
+            $safeMatches
+            exit 1
+        }
+        Write-Output 'secret scan: no obvious credential patterns found'
+        exit 0
     }
     if ($rgExitCode -eq 1) {
         Write-Output 'secret scan: no obvious credential patterns found'
