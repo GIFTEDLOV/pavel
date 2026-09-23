@@ -18,7 +18,11 @@ SHA_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
 def sha256_file(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    # GitHub's Windows runner may check the same tracked source out with CRLF.
+    # The deployed-source identity is the canonical LF byte stream, so the
+    # validator must not make the frozen contract hash platform-dependent.
+    canonical = path.read_bytes().replace(b"\r\n", b"\n")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def reject_sensitive_keys(value: object) -> None:
