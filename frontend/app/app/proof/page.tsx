@@ -1,6 +1,11 @@
-import { ProtocolShell } from "@/components/protocol-shell";
-import { AddressValue, DataCard, NotConnected, RouteIntro, Section, TrustBoundary } from "@/components/protocol-ui";
-import { configuredContracts } from "@/lib/pavel/config";
-import { PAVEL_NETWORK } from "@/lib/pavel/network";
+"use client";
 
-export default function ProofPage() { const contracts = configuredContracts(); return <ProtocolShell><RouteIntro eyebrow="PROOF / PROVENANCE" title="Trace source to state without overclaiming external settlement." body="This page surfaces the source-verified V7 deployment and its canonical read boundary. External settlement remains explicitly unconfirmed until an external observation exists." /><Section title="Network configuration"><div className="grid"><DataCard label="Network" value={PAVEL_NETWORK.alias} note={`chain ${PAVEL_NETWORK.chainId}`} /><DataCard label="RPC" value="Studionet API" note={PAVEL_NETWORK.rpcUrl} /><DataCard label="Currency" value={PAVEL_NETWORK.currency} note="Native GEN" /></div></Section><Section title="Configured contracts"><div className="card"><AddressValue label="Core" value={contracts.core} /><AddressValue label="Vault" value={contracts.vault} /></div></Section><TrustBoundary title="V7 source boundary" body="The live Core and Vault addresses below are source-verified against the qualified V7 pair. V5 and V6 remain historical deployments and are not runtime configuration." /><NotConnected body="Connect a wallet to reconcile deployed code, contract schema, transactions, and state readback against the configured pair." /></ProtocolShell>; }
+import { ProtocolShell } from "@/components/protocol-shell";
+import { AddressValue, DataCard, PageHeader, Section, TrustBoundary } from "@/components/protocol-ui";
+import { PAVEL_NETWORK } from "@/lib/pavel/network";
+import { configuredContracts } from "@/lib/pavel/config";
+
+export default function ProofPage() {
+  const contracts = configuredContracts();
+  return <ProtocolShell><PageHeader eyebrow="PROOF / DEPLOYMENT" title="A readable trail from source to state." body="PAVEL exposes the network, addresses, schemas, and accounting boundary that the application is actually using. Historical versions are never runtime fallbacks." /><Section eyebrow="ACTIVE CONFIGURATION" title="Studionet V7"><div className="grid"><DataCard label="Network" value="Studionet" note={`chain ${PAVEL_NETWORK.chainId}`} /><DataCard label="Currency" value="GEN" note="Native protocol value" /><DataCard label="Authorization" value="v2" note="12 semantic booleans" /><DataCard label="Fulfillment" value="v2" note="7 objective + 2 semantic" /></div></Section><Section title="Contracts"><div className="surface"><AddressValue label="Core" value={contracts.core} /><AddressValue label="Vault" value={contracts.vault} /><AddressValue label="RPC" value={PAVEL_NETWORK.rpcUrl} /><AddressValue label="Explorer" value={PAVEL_NETWORK.explorer} /></div></Section><TrustBoundary title="Application truth" body="The frontend does not declare a transfer paid merely because a release direction exists. Current qualified state is FULFILLED / RELEASE_PENDING with external observation unconfirmed." /></ProtocolShell>;
+}

@@ -16,8 +16,9 @@ export async function writeOnce(input: {
   method: string;
   args: readonly unknown[];
   write: Record<string, unknown>;
+  provider?: { request(args: { method: string; params?: unknown[] }): Promise<unknown> };
 }): Promise<TrackedWrite> {
-  const client = createPavelClient(input.account);
+  const client = createPavelClient(input.account, input.provider);
   // The caller supplies the already-validated write request. The client call
   // happens exactly once; persistence begins immediately after the hash is
   // returned so timeouts never trigger a blind rebroadcast.

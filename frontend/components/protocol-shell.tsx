@@ -1,27 +1,34 @@
+"use client";
+
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { usePathname } from "next/navigation";
+import { useState, type ReactNode } from "react";
 import { PAVEL_NETWORK } from "@/lib/pavel/network";
-import { WalletStatus } from "@/components/wallet-status";
+import { usePavel } from "./pavel-provider";
+import { WalletStatus } from "./wallet-status";
+import { TransactionCenter } from "./transaction-center";
 
 const nav = [
-  ["/app", "Overview"], ["/app/mandates", "Mandates"], ["/app/agents", "Agents"],
-  ["/app/intents", "Intents"], ["/app/evidence", "Evidence"], ["/app/vault", "Vault"],
-  ["/app/disputes", "Disputes"], ["/app/activity", "Activity"], ["/app/proof", "Proof"],
-  ["/app/security", "Security"], ["/integrate", "Integrate"],
+  ["/app", "Overview", "⌂"], ["/app/mandates", "Mandates", "M"], ["/app/agents", "Agents", "A"],
+  ["/app/intents", "Intents", "I"], ["/app/evidence", "Evidence", "E"], ["/app/vault", "Vault", "V"],
+  ["/app/disputes", "Disputes", "D"], ["/app/activity", "Activity", "↗"],
 ] as const;
 
-export function ProtocolShell({ children }: { children: ReactNode }) {
-  return <div className="shell">
-    <aside>
-      <Link className="brand" href="/">PAVEL<span>Protocol</span></Link>
-      <p className="eyebrow">Policy-governed<br />Autonomous Value<br />Execution Layer</p>
-      <nav aria-label="Protocol sections">{nav.map(([href, label]) => <Link key={href} href={href}>{label}</Link>)}</nav>
-      <div className="network-chip"><span className="dot" aria-hidden="true" />{PAVEL_NETWORK.alias} / chain {PAVEL_NETWORK.chainId}<small>Canonical read target</small></div>
-    </aside>
-    <main><header><div><span className="eyebrow">CONTROL PLANE / READ-ONLY UNTIL CONNECTED</span><h1>Constitutional execution for autonomous agents.</h1></div><WalletStatus /></header>{children}</main>
-  </div>;
-}
+const secondaryNav = [["/app/proof", "Proof"], ["/app/security", "Security"], ["/integrate", "Developers"]] as const;
 
-export function EmptyState({ title, body }: { title: string; body: string }) {
-  return <section className="empty"><span className="empty-mark" aria-hidden="true">[—]</span><h2>{title}</h2><p>{body}</p></section>;
+export function ProtocolShell({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const { snapshotLoading, snapshotError, refreshSnapshot } = usePavel();
+  return <div className="app-shell">
+    <aside className={mobileOpen ? "sidebar sidebar-open" : "sidebar"}>
+      <div className="sidebar-top"><Link className="brand" href="/" onClick={() => setMobileOpen(false)}><span className="brand-mark">P</span><span><strong>PAVEL</strong><small>Policy execution layer</small></span></Link><button className="mobile-close" type="button" onClick={() => setMobileOpen(false)} aria-label="Close navigation">×</button></div>
+      <div className="sidebar-section-label">Control plane</div>
+      <nav aria-label="Protocol sections">{nav.map(([href, label, icon]) => <Link className={pathname === href || pathname.startsWith(`${href}/`) ? "nav-link nav-active" : "nav-link"} key={href} href={href} onClick={() => setMobileOpen(false)}><span className="nav-icon" aria-hidden="true">{icon}</span>{label}</Link>)}</nav>
+      <div className="sidebar-section-label sidebar-lower">Reference</div>
+      <nav aria-label="Reference sections">{secondaryNav.map(([href, label]) => <Link className={pathname === href ? "nav-link nav-active" : "nav-link"} key={href} href={href} onClick={() => setMobileOpen(false)}>{label}</Link>)}</nav>
+      <div className="network-status"><span className="live-dot" aria-hidden="true" /> <span>Studionet</span><small>Chain {PAVEL_NETWORK.chainId}</small></div>
+    </aside>
+    <div className="app-main"><header className="topbar"><button className="mobile-menu" type="button" onClick={() => setMobileOpen(true)} aria-label="Open navigation">☰</button><div className="topbar-context"><span className="topbar-kicker">PAVEL / CONTROL PLANE</span><span className="read-state">{snapshotLoading ? "Reading latest final…" : snapshotError ? "Read unavailable" : "Latest final"}<i className={snapshotError ? "read-dot read-dot-error" : "read-dot"} aria-hidden="true" /></span></div><div className="topbar-actions"><button className="icon-button" type="button" title="Refresh canonical state" onClick={() => void refreshSnapshot()} aria-label="Refresh canonical state">↻</button><WalletStatus /></div></header><main className="app-content">{children}</main></div><TransactionCenter />
+  </div>;
 }
