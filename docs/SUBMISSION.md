@@ -5,12 +5,12 @@ intentionally placeholders until canonical deployment and hosting are
 explicitly authorized.
 
 - Repository: `[public repository link - not yet created]`
-- Application: `[public application link - not yet deployed]`
-- Canonical Core: `[canonical address - not yet deployed]`
-- Canonical Vault: `[canonical address - not yet deployed]`
-- Explorer proof: `[explorer links - not yet available]`
+- Application: `[PAVEL production hosting target not configured]`
+- Canonical Core qualification: `0xBA2356FfE5062506FA938da4715c03a2BE7929bF`
+- Canonical Vault qualification: `0x552167Cc0883D02ce42fA2aD64E29Cd10EE3eDFD`
+- Explorer proof: `https://explorer-studio.genlayer.com`
 
-The qualification-v1 failure and qualification-v2 source-verification trail
-are retained locally under versioned artifacts. Qualification-v2 Core and Vault
-are deployed and bidirectionally bound; no address in those artifacts is a
-canonical production claim.
+The qualification-v1 through V6 failure/history records and the V7
+source-verification trail are retained locally under versioned artifacts. V7
+is a verified Studionet qualification deployment; no public hosting URL is
+claimed until the intended PAVEL production project is identified.

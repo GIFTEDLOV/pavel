@@ -9,8 +9,8 @@ export const PAVEL_NETWORK = {
   explorer: "https://explorer-studio.genlayer.com" as const,
 };
 
-export const CORE_ADDRESS: Address | undefined = undefined;
-export const VAULT_ADDRESS: Address | undefined = undefined;
+export const CORE_ADDRESS: Address = "0xBA2356FfE5062506FA938da4715c03a2BE7929bF";
+export const VAULT_ADDRESS: Address = "0x552167Cc0883D02ce42fA2aD64E29Cd10EE3eDFD";
 
 export function assertPavelNetwork(): void {
   const chain = studionet as { id?: number; rpcUrls?: { default?: { http?: readonly string[] } } };

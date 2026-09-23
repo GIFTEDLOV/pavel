@@ -36,3 +36,11 @@ The following are machine-testable targets implemented or exercised in Phase 1:
     3600-second grace window ends retry intake and permits deterministic expiry.
 28. A transport recovery changes availability only; it cannot change source
     authority, identity fingerprint, evidence set membership, or snapshot ID.
+29. V7 fulfillment objective checks are computed from canonical state; they are
+    not delegated back to the semantic reviewer.
+30. A fulfillment artifact larger than 4096 bytes cannot be authenticated as an
+    accepted fulfillment review input, so no accepted fulfillment decision is
+    based on silent prefix truncation.
+31. Every `FULFILLED`, `NOT_FULFILLED`, or `FULFILLMENT_EXPIRED` Intent has one
+    Core settlement direction, and an unresolved pending/retry state has a
+    deterministic deadline recovery path to `FULFILLMENT_EXPIRED`.

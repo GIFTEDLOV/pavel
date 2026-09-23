@@ -108,3 +108,43 @@ def test_original_transport_can_recover_after_a_failed_mirror_without_identity_c
     assert intent["status"] == "EVIDENCE_READY"
     assert snapshot["captures"][0]["transport_url"] == "https://evidence.example/quote"
     assert json.loads(core.get_evidence(intent_id, 0))["evidence_id"] == evidence_id
+
+
+@pytest.mark.direct
+def test_uncommitted_evidence_identity_is_finalized_after_capture(direct_vm, direct_deploy, direct_owner, direct_alice):
+    direct_vm.warp(BASE_TIME)
+    core = direct_deploy("contracts/pavel_core.py")
+    mandate_id = configure_and_seal_core(core, direct_vm, direct_owner, direct_alice)
+    intent_id = create_submitted_intent(core, direct_vm, direct_owner, direct_alice, mandate_id)
+    direct_vm.sender = direct_alice
+    evidence_id = core.define_evidence(intent_id, "PRODUCT_SERVICE", "https://evidence.example/product", "evidence.example", "", 0, "evidence.example", 0)
+    definition = json.loads(core.get_evidence(intent_id, 0))
+    assert definition["evidence_id"] == evidence_id
+    assert definition["committed_sha256"] == ""
+    assert definition["committed_byte_length"] == "0"
+    direct_vm.mock_web(r"evidence\.example/product", {"status": 200, "body": "Product evidence"})
+    direct_vm.strict_mocks = True
+    core.stage_evidence(intent_id)
+    intent = json.loads(core.get_intent(intent_id))
+    definition = json.loads(core.get_evidence(intent_id, 0))
+    assert intent["status"] == "EVIDENCE_READY"
+    assert definition["committed_sha256"] == hashlib.sha256(b"Product evidence").hexdigest()
+    assert definition["committed_byte_length"] == str(len(b"Product evidence"))
+    assert definition["identity_fingerprint"] == core._evidence_identity_fingerprint(definition)
+    assert intent["current_snapshot_id"] == "S-1"
+
+
+@pytest.mark.direct
+def test_legacy_empty_commitment_mutation_reproduces_stale_identity_failure(direct_vm, direct_deploy, direct_owner, direct_alice):
+    direct_vm.warp(BASE_TIME)
+    core = direct_deploy("contracts/pavel_core.py")
+    mandate_id = configure_and_seal_core(core, direct_vm, direct_owner, direct_alice)
+    intent_id = create_submitted_intent(core, direct_vm, direct_owner, direct_alice, mandate_id)
+    direct_vm.sender = direct_alice
+    core.define_evidence(intent_id, "PRODUCT_SERVICE", "https://evidence.example/product", "evidence.example", "", 0, "evidence.example", 0)
+    definition = json.loads(core.get_evidence(intent_id, 0))
+    legacy_mutation = dict(definition)
+    legacy_mutation["committed_sha256"] = hashlib.sha256(b"Product evidence").hexdigest()
+    legacy_mutation["committed_byte_length"] = str(len(b"Product evidence"))
+    legacy_mutation["expected_hash"] = legacy_mutation["committed_sha256"]
+    assert legacy_mutation["identity_fingerprint"] != core._evidence_identity_fingerprint(legacy_mutation)

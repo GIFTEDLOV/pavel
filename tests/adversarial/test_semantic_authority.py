@@ -22,10 +22,10 @@ def test_authorization_extra_economic_fields_are_rejected_without_mutating_froze
     direct_vm.mock_web(r"evidence\.example/quote", {"status": 200, "body": "Provider: Atlas GPU\nAmount: 3 GEN"})
     core.stage_evidence(intent_id)
     intent_before = json.loads(core.get_intent(intent_id))
-    result = {"schema": "pavel-authorization-v1", "explanation": "bounded", "recipient": "0x1111111111111111111111111111111111111111", "amount": "999", "principal": "0x1111111111111111111111111111111111111111"}
+    result = {"schema": "pavel-authorization-v2", "recipient": "0x1111111111111111111111111111111111111111", "amount": "999", "principal": "0x1111111111111111111111111111111111111111"}
     for field in ("purpose_aligned", "activity_permitted", "prohibited_activity_absent", "counterparty_scope_satisfied", "deliverable_in_scope", "commercial_terms_consistent", "evidence_semantically_sufficient", "duplicate_semantic_purchase_absent", "authority_scope_preserved", "fulfillment_terms_defined", "external_dependencies_disclosed", "constitution_satisfied"):
         result[field] = True
-    direct_vm.mock_llm(r"pavel-authorization-v1", json.dumps(result))
+    direct_vm.mock_llm(r"pavel-authorization-v2", json.dumps(result))
     core.authorize_intent(intent_id)
     after = json.loads(core.get_intent(intent_id))
     assert after["status"] == "AUTHORIZATION_RETRY_REQUIRED"
@@ -37,8 +37,8 @@ def test_authorization_extra_economic_fields_are_rejected_without_mutating_froze
 def test_fulfillment_and_delegation_schema_reject_economic_identity_fields(direct_vm, direct_deploy):
     direct_vm.warp("2030-01-01T00:00:00Z")
     core = direct_deploy("contracts/pavel_core.py")
-    fulfillment = {"schema": "pavel-fulfillment-v1", "outcome": "FULFILLED", "explanation": "bounded", "recipient": "0x1111111111111111111111111111111111111111"}
-    for field in ("authorized_deliverable_identified", "provider_identity_consistent", "evidence_authentic", "delivery_corresponds_to_intent", "quantity_consistent", "material_terms_satisfied", "no_material_substitution", "completion_evidence_sufficient", "mandate_requirements_preserved"):
+    fulfillment = {"schema": "pavel-fulfillment-v2", "recipient": "0x1111111111111111111111111111111111111111"}
+    for field in ("material_terms_satisfied", "completion_evidence_sufficient"):
         fulfillment[field] = True
     assert core._fulfillment_valid(fulfillment) is False
     delegation = {"schema": "pavel-delegation-v1", "explanation": "bounded", "authorized_agent": "0x1111111111111111111111111111111111111111"}

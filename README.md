@@ -46,16 +46,16 @@ node scripts/network-guard.mjs
 GenVM-dependent tests are run serially. A network qualification is separate
 from local verification and uses a new versioned artifact directory.
 
-The qualification-v2 Core and corrected Vault finalized successfully, are
-source verified at their deployed revision, and are bidirectionally bound.
-The first root-Mandate transaction was finalized with a leader-receipt
-execution error (`malformed transaction timezone`) and no state mutation. A
-local parser compatibility fix and restart-safe reconciliation runner are
-committed; qualification remains historical until the fixed source is
-explicitly deployed and verified.
-Qualification-v1 remains historical failure evidence and is never a runtime
-default. No server wallet, database authority, GitHub remote, or public
-deployment is configured.
+The V7 Core and Vault are now source-verified and bidirectionally bound on
+Studionet 61999. A fresh lifecycle reached canonical authorization,
+reservation, full-content fulfillment, and a Core-directed release request.
+The final contract state is `FULFILLED` / `RELEASE_PENDING`; the external
+settlement observation remains explicitly `UNCONFIRMED`.
+
+The earlier qualification-v1 through V6 deployments remain immutable audit
+history and are never runtime defaults. The hosted V7 runner uses the pinned
+GenLayer CLI keychain cache non-interactively; no encrypted-keystore password
+is required by the release runner.
 
 ## Canonical network
 
@@ -90,10 +90,8 @@ versioned below `artifacts/studionet/` and are not canonical configuration.
 
 The first Vault deployment exposed a live constructor boundary defect:
 `Address(Address(...))`. It is preserved as qualification-v1 provenance. The
-corrected qualification-v2 Core and Vault are finalized and byte-for-byte
-source verified at their deployed revision. Funding and lifecycle qualification
-require explicit fixed-source deployment and the operator's secure manual
-signing step.
+V5/V6 histories remain preserved, and the V7 pair is the current
+source-verified Studionet qualification deployment.
 
 Read [`docs/QUALIFICATION.md`](docs/QUALIFICATION.md),
 [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md), and

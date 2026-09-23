@@ -1,4 +1,5 @@
 import importlib
+import hashlib
 import json
 
 import pytest
@@ -7,11 +8,11 @@ from .conftest import BASE_TIME, VALID_FROM, add_evidence, address_text, configu
 
 
 def _auth_result():
-    return {"schema": "pavel-authorization-v1", "explanation": "bounded", "purpose_aligned": True, "activity_permitted": True, "prohibited_activity_absent": True, "counterparty_scope_satisfied": True, "deliverable_in_scope": True, "commercial_terms_consistent": True, "evidence_semantically_sufficient": True, "duplicate_semantic_purchase_absent": True, "authority_scope_preserved": True, "fulfillment_terms_defined": True, "external_dependencies_disclosed": True, "constitution_satisfied": True}
+    return {"schema": "pavel-authorization-v2", "purpose_aligned": True, "activity_permitted": True, "prohibited_activity_absent": True, "counterparty_scope_satisfied": True, "deliverable_in_scope": True, "commercial_terms_consistent": True, "evidence_semantically_sufficient": True, "duplicate_semantic_purchase_absent": True, "authority_scope_preserved": True, "fulfillment_terms_defined": True, "external_dependencies_disclosed": True, "constitution_satisfied": True}
 
 
 def _fulfillment_result():
-    return {"schema": "pavel-fulfillment-v1", "outcome": "FULFILLED", "explanation": "bounded", "authorized_deliverable_identified": True, "provider_identity_consistent": True, "evidence_authentic": True, "delivery_corresponds_to_intent": True, "quantity_consistent": True, "material_terms_satisfied": True, "no_material_substitution": True, "completion_evidence_sufficient": True, "mandate_requirements_preserved": True}
+    return {"schema": "pavel-fulfillment-v2", "material_terms_satisfied": True, "completion_evidence_sufficient": True}
 
 
 @pytest.mark.direct
@@ -115,7 +116,12 @@ def test_fulfillment_writes_require_reservation_and_use_structured_consensus(dir
     direct_vm.sender = direct_alice
     core.start_fulfillment(intent_id)
     assert json.loads(core.get_intent(intent_id))["status"] == "FULFILLMENT_PENDING"
-    direct_vm.mock_llm(r"PAVEL fulfillment review", json.dumps(_fulfillment_result()))
+    body = "Provider: Atlas GPU\nAmount: 3 GEN"
+    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    core.define_evidence(intent_id, "FULFILLMENT", "https://evidence.example/quote", "evidence.example", digest, len(body.encode("utf-8")), "mirror.example", 1)
+    direct_vm.mock_web(r"evidence\.example/quote", {"status": 200, "body": body})
+    core.stage_evidence(intent_id)
+    direct_vm.mock_llm(r"PAVEL fulfillment", json.dumps(_fulfillment_result()))
     core.assess_fulfillment(intent_id)
     assert json.loads(core.get_intent(intent_id))["status"] == "FULFILLED"
     with direct_vm.expect_revert("intent is not awaiting fulfillment assessment"):

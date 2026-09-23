@@ -1,5 +1,6 @@
 import {createHash} from "node:crypto";
 import {existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync} from "node:fs";
+import {createRequire} from "node:module";
 import os from "node:os";
 import path from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";
@@ -36,6 +37,8 @@ export async function loadPinnedDependencies() {
     createAccount: sdk.createAccount,
     createClient: sdk.createClient,
     CalldataAddress: types.CalldataAddress,
+    TransactionHashVariant: types.TransactionHashVariant,
+    transactionResultNumberToName: types.transactionResultNumberToName,
     Wallet: ethers.Wallet,
     prompt: prompt.bind(inquirer.default ?? inquirer),
   };
@@ -151,6 +154,25 @@ export async function loadExistingAccount(Wallet: any, prompt: any, selected = f
   } finally {
     password = "";
   }
+}
+
+/**
+ * Load a signer cached by the pinned GenLayer CLI in the OS credential store.
+ * The credential never enters repository files, command arguments, or logs.
+ */
+export async function loadKeychainAccount(Wallet: any, accountName = "meritround-v2-studionet", expected = EXPECTED_SIGNER) {
+  const cliModules = stableCliNodeModules();
+  const cliRequire = createRequire(path.join(cliModules, "genlayer", "dist", "index.js"));
+  const keytar = cliRequire("keytar");
+  const secretMaterial = await keytar.getPassword("genlayer-cli", `account:${accountName}`);
+  if (typeof secretMaterial !== "string" || secretMaterial.length === 0) {
+    throw new Error(`No non-interactive signer is cached for GenLayer account ${accountName}`);
+  }
+  const wallet = new Wallet(secretMaterial);
+  if (wallet.address.toLowerCase() !== expected.toLowerCase()) {
+    throw new Error(`Cached GenLayer account ${accountName} does not match the expected signer`);
+  }
+  return {wallet, accountName, selectedKeystoreAddress: normalizeMetadataAddress(wallet.address)};
 }
 
 async function main() {

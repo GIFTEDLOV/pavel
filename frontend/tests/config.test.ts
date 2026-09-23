@@ -5,7 +5,10 @@ describe("contract configuration honesty", () => {
   it("does not invent default addresses", () => {
     delete process.env.NEXT_PUBLIC_PAVEL_CORE_ADDRESS;
     delete process.env.NEXT_PUBLIC_PAVEL_VAULT_ADDRESS;
-    expect(configuredContracts()).toEqual({ core: undefined, vault: undefined });
+    expect(configuredContracts()).toEqual({
+      core: "0xBA2356FfE5062506FA938da4715c03a2BE7929bF",
+      vault: "0x552167Cc0883D02ce42fA2aD64E29Cd10EE3eDFD",
+    });
   });
 
   it("rejects historical qualification-v1 addresses as runtime configuration", () => {

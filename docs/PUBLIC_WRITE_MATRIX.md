@@ -1,7 +1,7 @@
 # PAVEL public write matrix
 
-This is the Phase 1.5 audit inventory. The current stable source exposes 23
-Core writes and 5 Vault writes. A caller is never trusted for economic values:
+This is the Phase 1.5 audit inventory. The current V7 source exposes 24 Core
+writes and 5 Vault writes. A caller is never trusted for economic values:
 Core freezes them and Vault rereads them synchronously through typed views.
 `N/A` in the nondeterministic column means the transition is deterministic.
 
@@ -24,9 +24,10 @@ Core freezes them and Vault rereads them synchronously through typed views.
 | `define_challenge_evidence(...)` | Recorded challenger for its challenge | challenge `SUBMITTED` -> `EVIDENCE_PENDING` | none | N/A / none | `(challenge,evidence_id,sequence)` identity; deadline, authority, replay, kind failures | challenge admissibility and lifecycle tests |
 | `configure_evidence_recovery(intent,evidence,url)` | Intent agent or recorded challenger for its own evidence | retry/repair -> recovery configured | none | N/A / none | recovery transport consumed once; authority/identity mismatch fails; deadline/grace applies | `test_evidence_recovery_audit`, steward recovery tests |
 | `stage_evidence(intent)` | Permissionless trigger; evidence definitions are already bound | submitted/retry/recovery -> ready/retry/repair | none | web capture consensus / none | immutable snapshot ID; retryable infrastructure vs inadmissible evidence; snapshot cap | `test_core_lifecycle`, `test_web_failure_matrix`, recovery audit |
-| `authorize_intent(intent)` | Permissionless trigger after deterministic preconditions | `EVIDENCE_READY` -> `AUTHORIZED`/`REJECTED`/retry | records authority only; no reservation | auth vector consensus / none | snapshot/mandate/expiry; malformed/disagreement -> retry, never rejection | `test_core_lifecycle`, LLM/schema/adversarial suites |
+| `authorize_intent(intent)` | Permissionless trigger after deterministic preconditions | `EVIDENCE_READY` -> `AUTHORIZED`/`REJECTED`/retry | records authority only; no reservation | V6 twelve-boolean auth vector consensus / none | exact `pavel-authorization-v2` object; malformed/disagreement -> retry, never rejection; all-true -> `AUTHORIZED`, any false -> deterministic rejection with `failed_checks` | `test_core_lifecycle`, LLM/schema/adversarial suites |
 | `start_fulfillment(intent)` | Permissionless trigger after exact Vault reservation | `AUTHORIZED` -> `FULFILLMENT_PENDING` | no accounting mutation | synchronous Vault reservation view | one-shot state check; missing/mismatched reservation fails | public write surface, lifecycle sequences |
-| `assess_fulfillment(intent)` | Permissionless trigger after fulfillment evidence and reservation | pending -> `FULFILLED`/`NOT_FULFILLED`/retry | records fixed release/refund direction only | fulfillment vector consensus / synchronous Vault view | one assessment; malformed/disagreement/indeterminate -> retry | public write surface, schema/semantic authority suites |
+| `assess_fulfillment(intent)` | Permissionless trigger after fulfillment evidence and reservation | pending -> `FULFILLED`/`NOT_FULFILLED`/retry | records fixed release/refund direction only | two-field semantic vector consensus / synchronous Vault view; seven objective checks are deterministic | full authenticated fulfillment content must be <=4096 bytes; malformed/disagreement -> retry without direction; objective failure -> refund direction | V7 fulfillment suite, schema/adversarial suites |
+| `expire_fulfillment(intent)` | Permissionless after the frozen fulfillment deadline | pending/retry -> `FULFILLMENT_EXPIRED` | records refund direction; no accounting mutation | N/A / synchronous Vault view | deadline required; idempotent state guard; only a matching reservation can transition | V7 fulfillment timeout suite |
 | `expire_intent(intent)` | Permissionless | eligible unassessed state -> `EXPIRED` | no funds moved | N/A / none | deadline required; one-shot; never expires authorized/reserved state | `test_public_write_surface::test_expire_intent...` |
 | `open_dispute(intent,reason)` | Any address during challenge window | challenge index append `SUBMITTED` | no funds; not blocking yet | N/A / none | duplicate submission, one unresolved submission per challenger, record cap, deadline, bounded reason; append-only | steward multi-challenge and lifecycle suites |
 | `expire_challenge(id)` | Any address after deadline + 3600s grace | pending/qualifying -> `EXPIRED` | removes only that challenge's blocking count | N/A / none | one-shot; grace-bounded, indexed; no early expiry | challenge admissibility and lifecycle suites |
@@ -45,7 +46,7 @@ Core freezes them and Vault rereads them synchronously through typed views.
 
 ## Matrix audit conclusion
 
-The write surface is 28 methods total. Every row has a positive path and a
+The write surface is 29 methods total. Every row has a positive path and a
 negative state/authorization path in the named suites. Repeated-call coverage
 is explicit for one-shot binding, sealing, submission, evidence recovery,
 challenge submission/expiry/adjudication, reservation, and settlement. The

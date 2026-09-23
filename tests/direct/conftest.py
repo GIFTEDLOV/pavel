@@ -115,7 +115,23 @@ def seed_fulfilled_intent(core, intent_id, challenge_deadline=1893459600):
     """
     item = json.loads(core.get_intent(intent_id))
     item["status"] = "FULFILLED"
-    item["fulfillment"] = json.dumps({"schema": "pavel-fulfillment-v1", "vector": {"outcome": "FULFILLED"}, "snapshot_id": item["current_snapshot_id"]}, sort_keys=True, separators=(",", ":"))
+    item["fulfillment"] = json.dumps({
+        "schema": "pavel-fulfillment-v2",
+        "objective_checks": {
+            "authorized_deliverable_identified": True,
+            "provider_identity_consistent": True,
+            "evidence_authentic": True,
+            "delivery_corresponds_to_intent": True,
+            "quantity_consistent": True,
+            "no_material_substitution": True,
+            "mandate_requirements_preserved": True,
+        },
+        "semantic_vector": {"material_terms_satisfied": True, "completion_evidence_sufficient": True},
+        "failed_checks": [],
+        "result_status": "FULFILLED",
+        "semantic_evaluation": "CONSENSUS_ACCEPTED",
+        "snapshot_id": item["current_snapshot_id"],
+    }, sort_keys=True, separators=(",", ":"))
     item["settlement_direction"] = "RELEASE_TO_COUNTERPARTY"
     item["settlement_ready_at"] = str(challenge_deadline)
     item["challenge_deadline"] = str(challenge_deadline)

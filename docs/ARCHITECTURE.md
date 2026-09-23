@@ -21,7 +21,7 @@ Vault owns GEN deposits, available and reserved funds, pending outbound balances
 5. Core records a release/refund direction after fulfillment or dispute.
 6. A caller invokes Vault settlement; Vault reads Core, moves accounting once, and emits the finalized external transfer.
 
-Internal write-message semantics therefore do not create a hidden callback or shadow ledger. The Vault binding is one-time: Vault is constructed with Core, its deployment binding admin calls `bind_core()`, and Core owner calls `set_vault_address()` once. Both addresses are readable and immutable after binding.
+Internal write-message semantics therefore do not create a hidden callback or shadow ledger. The Vault binding is one-time: Vault is constructed with Core, its deployment binding admin calls `bind_core()`, and Core owner calls `set_vault_address()` once. Both addresses are readable and immutable after binding. Consequently a V6 Core cannot be attached to the deployed V5 Vault, and a fresh V6 Vault cannot inherit V5's stored deposit or Core records without an explicit migration interface; none exists in the deployed contracts.
 
 ## Frontend trust boundary
 

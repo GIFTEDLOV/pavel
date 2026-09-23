@@ -101,8 +101,8 @@ def test_malformed_authorization_vector_fails_closed_with_retry_state(direct_vm,
     add_evidence(core, direct_vm, direct_alice, intent_id)
     direct_vm.mock_web(r"evidence\.example/quote", {"status": 200, "body": "Provider: Atlas GPU\nAmount: 3 GEN"})
     core.stage_evidence(intent_id)
-    malformed = {"schema": "pavel-authorization-v1", "explanation": "bad", "purpose_aligned": "true"}
-    direct_vm.mock_llm(r"pavel-authorization-v1", json.dumps(malformed))
+    malformed = {"schema": "pavel-authorization-v2", "purpose_aligned": "true"}
+    direct_vm.mock_llm(r"pavel-authorization-v2", json.dumps(malformed))
     direct_vm.strict_mocks = True
     core.authorize_intent(intent_id)
     assert json.loads(core.get_intent(intent_id))["status"] == "AUTHORIZATION_RETRY_REQUIRED"
@@ -183,8 +183,8 @@ def test_authorized_view_requires_explicit_consensus_result(direct_vm, direct_de
     add_evidence(core, direct_vm, direct_alice, intent_id)
     direct_vm.mock_web(r"evidence\.example/quote", {"status": 200, "body": "Provider: Atlas GPU\nAmount: 3 GEN"})
     core.stage_evidence(intent_id)
-    result = {"schema": "pavel-authorization-v1", "explanation": "bounded", "purpose_aligned": True, "activity_permitted": True, "prohibited_activity_absent": True, "counterparty_scope_satisfied": True, "deliverable_in_scope": True, "commercial_terms_consistent": True, "evidence_semantically_sufficient": True, "duplicate_semantic_purchase_absent": True, "authority_scope_preserved": True, "fulfillment_terms_defined": True, "external_dependencies_disclosed": True, "constitution_satisfied": True}
-    direct_vm.mock_llm(r"pavel-authorization-v1", json.dumps(result))
+    result = {"schema": "pavel-authorization-v2", "purpose_aligned": True, "activity_permitted": True, "prohibited_activity_absent": True, "counterparty_scope_satisfied": True, "deliverable_in_scope": True, "commercial_terms_consistent": True, "evidence_semantically_sufficient": True, "duplicate_semantic_purchase_absent": True, "authority_scope_preserved": True, "fulfillment_terms_defined": True, "external_dependencies_disclosed": True, "constitution_satisfied": True}
+    direct_vm.mock_llm(r"pavel-authorization-v2", json.dumps(result))
     core.authorize_intent(intent_id)
     assert json.loads(core.get_intent(intent_id))["status"] == "AUTHORIZED"
     assert json.loads(core.get_authorization_for_vault(intent_id))["status"] == "AUTHORIZED"

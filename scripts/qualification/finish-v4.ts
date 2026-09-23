@@ -7,6 +7,17 @@ import {
   loadExistingAccount,
   loadPinnedDependencies,
 } from "./create-root-mandate.ts";
+import {
+  FALLBACK_LATEST_FINAL,
+  getTriggeredTransactionIds,
+  isSuccessful,
+  normalizeTransaction,
+  readLatestFinalPostcondition,
+  reconcileSameHash as reconcileOfficialSameHash,
+  requireSuccessfulExecution,
+  sendWriteOnce,
+  transactionCompatibility,
+} from "./lib/official-transaction.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const ARTIFACT_DIR = path.join(ROOT, "artifacts", "studionet", "qualification-v4");
@@ -23,6 +34,8 @@ const CORE_SHA = "6ece0d1aae99ccbd734b97802c9ca2481a38264da593b43ca8a5d7ab188c70
 const VAULT_SHA = "d967d6f1e70cd698fc428338ca822c5541ce07fd7977517db7bb19f9796aa8ed";
 const SEAL_REFERENCE_TX = "0x95377b0ccc9ccd8107d4df7c7adc8fbc089647c0d26eadfe5cdb939fd7a4df1f";
 const FAILED_COUNTERPARTY_TX = "0xa01e0ec943207656700c0fdd463039cb6b9f53c406476c6f4a50dd68603c2212";
+const COUNTERPARTY_TX = "0x6c7dd6ee2d9ead2518606f58489753d21c28b4a8d1bf7cd7643db566da68fcec";
+const DEPOSIT_TX = "0xb0de007e3485d99b31ca766fd8ab1bc6430065aa94d897fb0b37f4112be6c2a6";
 const COUNTERPARTY_LABEL = "qualification-v4-counterparty";
 const COUNTERPARTY_ID = "C-1";
 const MANDATE_ID = "M-1";
@@ -103,6 +116,7 @@ class RpcScheduler {
 }
 
 const RPC_SCHEDULER = new RpcScheduler();
+let ACTIVE_LATEST_FINAL_VARIANT = FALLBACK_LATEST_FINAL;
 
 function loadFixture(): Fixture { return JSON.parse(readFileSync(FIXTURE_PATH, "utf8")); }
 function validateHttps(url: string, authority: string) {
@@ -119,27 +133,33 @@ function accounting(value: any, label: string) {
   if (sum !== deposited || item.conserved !== true) throw new Error(`${label} accounting invariant failed`);
   return item;
 }
+function transactionSummary(value: any) {
+  const tx = normalizeTransaction(value);
+  return jsonSafe({
+    hash: tx.hash ?? tx.tx_id,
+    statusName: tx.statusName,
+    resultName: tx.resultName,
+    txExecutionResultName: tx.txExecutionResultName,
+    lifecycle: tx.lifecycle,
+    recipient: tx.recipient,
+    txDataDecoded: tx.txDataDecoded,
+    data: tx.data,
+    value: tx.value,
+    valueCredited: tx.value_credited,
+    executionSource: tx.executionSource,
+    isSuccessful: isSuccessful(tx),
+  });
+}
 function assertGlobalMatchesMandate(global: any, mandate: any, label: string) {
   for (const field of ["deposited", "available", "reserved", "release_pending", "refund_pending", "recovered"]) if (text(global[field] ?? "0") !== text(mandate[field] ?? "0")) throw new Error(`${label} global/mandate accounting mismatch for ${field}`);
 }
-function classifyExecution(receipt: any) {
-  const values = [receipt?.txExecutionResultName, receipt?.tx_execution_result_name, receipt?.txExecutionResult, receipt?.tx_execution_result, receipt?.executionResult, receipt?.execution_result];
-  const classify = (value: any) => {
-    const normalized = text(value).toUpperCase();
-    if (["SUCCESS", "FINISHED_WITH_RETURN", "RETURN", "COMMITTED", "OK", "1"].includes(normalized)) return "SUCCESS";
-    if (["ERROR", "FINISHED_WITH_ERROR", "ROLLBACK", "FAILED", "FAILURE", "2"].includes(normalized)) return "ERROR";
-    return "UNKNOWN";
-  };
-  for (const value of values) { const result = classify(value); if (result !== "UNKNOWN") return result; }
-  const leaders = Array.isArray(receipt?.consensus_data?.leader_receipt) ? receipt.consensus_data.leader_receipt : Array.isArray(receipt?.leader_receipt) ? receipt.leader_receipt : [];
-  for (const leader of leaders) { const result = classify(leader?.result?.status ?? leader?.status); if (result !== "UNKNOWN") return result; }
-  return "UNKNOWN";
-}
 function readClientFor(deps: any) { return deps.createClient({chain: deps.chains.studionet, endpoint: RPC, account: SIGNER_RPC}); }
-function readContract(client: any, address: string, functionName: string, args: any[] = []) {
-  return RPC_SCHEDULER.enqueue(`read:${functionName}`, () => client.readContract({address, functionName, args, account: SIGNER_RPC}), true);
+function readContract(client: any, address: string, functionName: string, args: any[] = [], transactionHashVariant: string = ACTIVE_LATEST_FINAL_VARIANT) {
+  return RPC_SCHEDULER.enqueue(`read:${functionName}`, () => readLatestFinalPostcondition({client, address, functionName, args, account: SIGNER_RPC, transactionHashVariant}), true);
 }
-function writeTarget(label: string) { return label.startsWith("vault:") ? VAULT : CORE; }
+function writeTarget(label: string, functionName = "") {
+  return label.startsWith("vault:") || ["deposit", "reserve", "request_release"].includes(functionName) ? VAULT : CORE;
+}
 function typedCalldataProof(abi: any, functionName: string, args: any[]) {
   const object = abi.calldata.makeCalldataObject(functionName, args, undefined);
   const encoded = abi.calldata.encode(object);
@@ -177,6 +197,16 @@ function recordFailed(checkpoint: Checkpoint, step: Step) {
 }
 function recordCompleted(checkpoint: Checkpoint, step: Step) { checkpoint.completedSteps[step.label] = {...step}; }
 function assertNotHistoricalFailedTx(tx: string) { if (tx === FAILED_COUNTERPARTY_TX) throw new Error("Historical failed counterparty transaction may never be replayed"); }
+function prepareKnownFailedDepositRecovery(checkpoint: Checkpoint) {
+  const current = checkpoint.steps.deposit;
+  if (!current || current.status !== "ERROR") return;
+  if (current.tx !== DEPOSIT_TX) throw new Error("A failed deposit checkpoint exists; automatic write retry is disabled for unknown transactions");
+  if (!checkpoint.failedAttempts.some((item) => item.tx === DEPOSIT_TX)) recordFailed(checkpoint, {...current, status: "ERROR"});
+  delete checkpoint.steps.deposit;
+  delete checkpoint.completedSteps.deposit;
+  checkpoint.observations.depositRecovery = {historicalFailedTx: DEPOSIT_TX, replayed: false, newHashRequired: true, correctedRecipient: VAULT};
+  saveCheckpoint(checkpoint);
+}
 
 async function chainTime(client: any) {
   const receipt = await RPC_SCHEDULER.enqueue(`chain-time:${SEAL_REFERENCE_TX}`, () => client.getTransaction({hash: SEAL_REFERENCE_TX}), true);
@@ -193,19 +223,14 @@ async function liveMandate(client: any) {
 }
 async function reconcile(client: any, tx: string) {
   assertNotHistoricalFailedTx(tx);
-  for (let attempt = 1; attempt <= MAX_POLLS; attempt += 1) {
-    const receipt = await RPC_SCHEDULER.enqueue(`tx:${tx}:status`, () => client.getTransaction({hash: tx}), true);
-    const status = text(receipt?.statusName ?? receipt?.status);
-    if (status === "FINALIZED") {
-      const execution = classifyExecution(receipt);
-      if (execution === "ERROR") throw new Error(`Transaction ${tx} finalized with execution ERROR`);
-      if (execution !== "SUCCESS") throw new Error(`Transaction ${tx} finalized with unknown execution result`);
-      return {receipt, execution};
-    }
-    if (["CANCELED", "UNDETERMINED", "VALIDATORS_TIMEOUT", "LEADER_TIMEOUT"].includes(status)) throw new Error(`Transaction ${tx} reached terminal status ${status}`);
-    await sleep(POLL_MS);
+  const result = await RPC_SCHEDULER.enqueue(`tx:${tx}:official-finalization`, () => reconcileOfficialSameHash({client, hash: tx, interval: POLL_MS, retries: MAX_POLLS}), true);
+  if (!result.successful) {
+    const normalized = normalizeTransaction(result.tx);
+    if (normalized.txExecutionResultName === transactionCompatibility.errorExecution) throw new Error(`Transaction ${tx} finalized with execution ERROR`);
+    throw new Error(`Transaction ${tx} finalized with unknown execution result`);
   }
-  throw new Error(`Transaction ${tx} did not finalize within the bounded reconciliation window`);
+  requireSuccessfulExecution(result.tx);
+  return {receipt: result.tx, execution: "SUCCESS"};
 }
 
 async function executeStep(config: {abi: any; client: any; account: any; checkpoint: Checkpoint; label: string; functionName: string; args: any[]; value?: bigint; precondition: () => Promise<void>; readback: () => Promise<any>; postcondition: (readback: any) => Promise<any>}) {
@@ -224,12 +249,18 @@ async function executeStep(config: {abi: any; client: any; account: any; checkpo
   } else {
     const proof = typedCalldataProof(abi, functionName, args);
     await precondition();
-    tx = String(await RPC_SCHEDULER.enqueue(`write:${label}`, () => client.writeContract({address: writeTarget(label), functionName, args, value, account}), false));
-    assertNotHistoricalFailedTx(tx);
-    checkpoint.steps[label] = {label, tx, status: "SUBMITTED"};
-    recordSubmitted(checkpoint, checkpoint.steps[label]);
-    checkpoint.observations.lastPreparedCalldata = {label, proof, value: value.toString()};
-    saveCheckpoint(checkpoint);
+    tx = await RPC_SCHEDULER.enqueue(`write:${label}`, () => sendWriteOnce({
+      client,
+      operation: label,
+      request: {address: writeTarget(label, functionName), functionName, args, value, account},
+      persistHash: (hash) => {
+        assertNotHistoricalFailedTx(hash);
+        checkpoint.steps[label] = {label, tx: hash, status: "SUBMITTED"};
+        recordSubmitted(checkpoint, checkpoint.steps[label]);
+        checkpoint.observations.lastPreparedCalldata = {label, proof, value: value.toString()};
+        saveCheckpoint(checkpoint);
+      },
+    }), false);
     console.log(`TX_SUBMITTED=${label} ${tx}`);
   }
   let result: any;
@@ -276,14 +307,38 @@ async function preflight() {
   if (deps.chains.studionet.id !== CHAIN_ID || deps.chains.studionet.rpcUrls.default.http[0] !== RPC) throw new Error("Pinned Studionet configuration mismatch");
   const client = readClientFor(deps);
   if (await RPC_SCHEDULER.enqueue("chain-id", () => client.getChainId(), true) !== CHAIN_ID) throw new Error("RPC is not Studionet 61999");
-  const checkpointExists = existsSync(CHECKPOINT_PATH);
-  const checkpoint = checkpointExists ? loadCheckpoint() : null;
-  const live = await assertStaticLiveState(client, Boolean(checkpoint?.steps?.counterparty?.tx));
+  const checkpoint = loadCheckpoint();
+  const latestFinal = deps.TransactionHashVariant?.LATEST_FINAL ?? FALLBACK_LATEST_FINAL;
+  ACTIVE_LATEST_FINAL_VARIANT = latestFinal;
+  const controlReconciled = await RPC_SCHEDULER.enqueue(`tx:${SEAL_REFERENCE_TX}:official-control`, () => reconcileOfficialSameHash({client, hash: SEAL_REFERENCE_TX, interval: 1, retries: 2}), true);
+  if (!controlReconciled.successful) throw new Error(`Known successful control transaction did not pass the official success adapter: ${SEAL_REFERENCE_TX}`);
+  const counterpartyReconciled = await RPC_SCHEDULER.enqueue(`tx:${COUNTERPARTY_TX}:official-counterparty`, () => reconcileOfficialSameHash({client, hash: COUNTERPARTY_TX, interval: 1, retries: 2}), true);
+  if (!counterpartyReconciled.successful) throw new Error(`Existing counterparty transaction is not a successful finalized execution: ${COUNTERPARTY_TX}`);
+  const depositReconciled = await RPC_SCHEDULER.enqueue(`tx:${DEPOSIT_TX}:official-deposit`, () => reconcileOfficialSameHash({client, hash: DEPOSIT_TX, interval: 1, retries: 2}), true);
+  const live = await assertStaticLiveState(client, true);
   const counterpartyArgs = [calldataAddress(deps.CalldataAddress, SIGNER), COUNTERPARTY_LABEL, EVIDENCE_URL];
   const calldata = typedCalldataProof(deps.abi, "register_counterparty", counterpartyArgs);
-  const beforeAccounting = accounting(await readContract(client, VAULT, "get_accounting", [MANDATE_ID]), "Pre-deposit");
+  const counterpartyState = asRecord(await readContract(client, CORE, "get_counterparty", [COUNTERPARTY_ID], latestFinal));
+  if (counterpartyState.identity_id !== COUNTERPARTY_ID || !sameAddress(counterpartyState.bound_wallet, SIGNER) || counterpartyState.label !== COUNTERPARTY_LABEL || counterpartyState.authority_origin !== AUTHORITY || counterpartyState.active !== true) throw new Error("Existing counterparty postcondition mismatch");
+  const beforeAccounting = accounting(await readContract(client, VAULT, "get_accounting", [MANDATE_ID], latestFinal), "Pre-deposit");
   if (BigInt(beforeAccounting.deposited) > AMOUNT) throw new Error("M-1 already contains more than the exact qualification deposit");
-  const firstLiveWrite = Object.keys(live.counterparty).length ? "finish:deposit" : "core:register_counterparty:corrected";
+  const depositSucceeded = depositReconciled.successful;
+  if (depositSucceeded && (BigInt(beforeAccounting.deposited) !== AMOUNT || BigInt(beforeAccounting.available) !== AMOUNT)) throw new Error("Official deposit success lacks the required finalized Vault postcondition");
+  if (!depositSucceeded && BigInt(beforeAccounting.deposited) !== 0n) throw new Error("Failed deposit did not roll back to the proven zero-accounting state");
+  if (checkpoint.completedSteps?.deposit?.tx === DEPOSIT_TX) throw new Error("Failed existing deposit may never satisfy completion");
+  checkpoint.observations.officialSdkReconciliation = {
+    control: transactionSummary(controlReconciled.tx),
+    counterparty: transactionSummary(counterpartyReconciled.tx),
+    counterpartyPostcondition: counterpartyState,
+    deposit: transactionSummary(depositReconciled.tx),
+    depositAccountingPostcondition: beforeAccounting,
+    depositStateMutation: depositSucceeded ? "EXPECTED_ACCOUNTING_PRESENT" : "ROLLED_BACK_UNCHANGED",
+    depositCallShape: {method: "deposit", args: [MANDATE_ID], value: "1", feeValue: null, submittedRecipient: normalizeAddress(depositReconciled.tx.recipient), correctedRecipient: VAULT},
+    adapter: {waitForFinalization: "stable-sdk-waitForTransactionReceipt-compatible", isSuccessful: "official-transaction adapter", latestFinal: latestFinal},
+  };
+  if (!depositSucceeded) recordFailed(checkpoint, {label: "deposit", tx: DEPOSIT_TX, status: "ERROR", error: "FINALIZED consensus with FINISHED_WITH_ERROR; Vault state rolled back"});
+  saveCheckpoint(checkpoint);
+  const firstLiveWrite = Object.keys(live.counterparty).length ? (depositSucceeded ? "core:create_intent" : "vault:deposit:new-hash") : "core:register_counterparty:corrected";
   if (!Object.keys(live.counterparty).length && checkpoint?.completedSteps?.counterparty?.status === "COMPLETE") throw new Error("finish checkpoint claims counterparty completion but chain state is absent");
   const timeRemaining = Number(live.mandate.expires_at) - live.time.chainNow;
   if (timeRemaining <= 3600) throw new Error(`M-1 expiry buffer is too small: ${timeRemaining}s`);
@@ -300,12 +355,30 @@ async function preflight() {
     timeRemaining,
     binding: "PASS",
     principalAgentIdentity: "PASS_FROM_LIVE_MANDATE",
-    counterpartyAbsent: Object.keys(live.counterparty).length === 0,
+    counterpartyAbsent: false,
+    knownSuccessControlTxResult: transactionSummary(controlReconciled.tx),
+    counterpartyTxResult: transactionSummary(counterpartyReconciled.tx),
+    counterpartyPostcondition: counterpartyState,
+    depositTxResult: transactionSummary(depositReconciled.tx),
+    depositStatusName: normalizeTransaction(depositReconciled.tx).statusName,
+    depositExecutionResultName: normalizeTransaction(depositReconciled.tx).txExecutionResultName,
+    depositIsSuccessful: depositSucceeded,
+    depositMethod: "deposit",
+    depositArgs: [MANDATE_ID],
+    depositValue: text(depositReconciled.tx.value ?? "0"),
+    depositFeeValue: null,
+    depositRecipient: normalizeAddress(depositReconciled.tx.recipient),
+    correctedDepositRecipient: VAULT,
+    depositPostcondition: beforeAccounting,
+    depositAccountingInvariant: beforeAccounting.conserved === true,
+    transactionAdapterRootCause: "The pinned 0.39.2 Studio client returns legacy consensus execution observations without top-level txExecutionResultName; waitForFinalization/isSuccessful are absent. The failed deposit was also routed to Core instead of the payable Vault.",
+    transactionAdapterFix: "scripts/qualification/lib/official-transaction.ts centralizes stable SDK finalization, legacy execution normalization, fail-closed isSuccessful, same-hash reconciliation, latest-final reads, and child tracking; finish-v4 now routes deposit/reserve/release by method to Vault.",
     failedCounterpartyTx: FAILED_COUNTERPARTY_TX,
     evidenceUrl: EVIDENCE_URL,
     evidenceHttpStatus: urlResponse.status,
     counterpartyCalldata: calldata,
     depositAccounting: beforeAccounting,
+    nextUnfinishedWrite: firstLiveWrite,
     zeroWrites: true,
   };
 }
@@ -334,6 +407,7 @@ async function proveUnassessed(client: any, checkpoint: Checkpoint) {
 
 async function runLifecycle() {
   const deps = await loadPinnedDependencies();
+  ACTIVE_LATEST_FINAL_VARIANT = deps.TransactionHashVariant?.LATEST_FINAL ?? FALLBACK_LATEST_FINAL;
   const {abi, CalldataAddress, Wallet, prompt, createAccount} = deps;
   const selectedKeystore = findExpectedKeystore();
   const fixture = loadFixture();
@@ -353,7 +427,10 @@ async function runLifecycle() {
     let mandateState = await liveMandate(client);
     const beforeAccounting = accounting(await readContract(client, VAULT, "get_accounting", [MANDATE_ID]), "Pre-deposit");
     let depositResult: any = null;
-    if (BigInt(beforeAccounting.deposited) < AMOUNT) depositResult = await executeStep({checkpoint, abi, client, account, label: "deposit", functionName: "deposit", args: [MANDATE_ID], value: AMOUNT, precondition: async () => { const live = await liveMandate(client); if (!sameAddress(live.mandate.principal, SIGNER)) throw new Error("Deposit principal mismatch"); const current = accounting(await readContract(client, VAULT, "get_accounting", [MANDATE_ID]), "Deposit precondition"); if (BigInt(current.deposited) !== BigInt(beforeAccounting.deposited)) throw new Error("Deposit state changed during preparation"); }, readback: async () => readContract(client, VAULT, "get_accounting", [MANDATE_ID]), postcondition: async (value) => { const item = accounting(value, "Deposit postcondition"); if (BigInt(item.deposited) !== AMOUNT || BigInt(item.available) !== AMOUNT) throw new Error("Deposit did not produce exactly one available GEN"); assertGlobalMatchesMandate(accounting(await readContract(client, VAULT, "get_global_accounting"), "Global after deposit"), item, "Deposit"); return item; }});
+    if (BigInt(beforeAccounting.deposited) < AMOUNT) {
+      prepareKnownFailedDepositRecovery(checkpoint);
+      depositResult = await executeStep({checkpoint, abi, client, account, label: "deposit", functionName: "deposit", args: [MANDATE_ID], value: AMOUNT, precondition: async () => { const live = await liveMandate(client); if (!sameAddress(live.mandate.principal, SIGNER)) throw new Error("Deposit principal mismatch"); const current = accounting(await readContract(client, VAULT, "get_accounting", [MANDATE_ID]), "Deposit precondition"); if (BigInt(current.deposited) !== BigInt(beforeAccounting.deposited)) throw new Error("Deposit state changed during preparation"); }, readback: async () => readContract(client, VAULT, "get_accounting", [MANDATE_ID]), postcondition: async (value) => { const item = accounting(value, "Deposit postcondition"); if (BigInt(item.deposited) !== AMOUNT || BigInt(item.available) !== AMOUNT) throw new Error("Deposit did not produce exactly one available GEN"); assertGlobalMatchesMandate(accounting(await readContract(client, VAULT, "get_global_accounting"), "Global after deposit"), item, "Deposit"); return item; }});
+    }
     else if (BigInt(beforeAccounting.deposited) !== AMOUNT || BigInt(beforeAccounting.available) !== AMOUNT) throw new Error("Existing M-1 deposit is not the exact available qualification amount");
     mandateState = await liveMandate(client);
     const intentExpiry = Math.min(Number(mandateState.mandate.expires_at), mandateState.time.chainNow + 3600);
@@ -410,7 +487,7 @@ async function runLifecycle() {
     const settlementRecord = asRecord(await readContract(client, VAULT, "get_settlement", [settlement.settlement_id]));
     let externalObservation: any;
     try {
-      const triggered = await RPC_SCHEDULER.enqueue(`triggered:${settlementResult?.tx ?? checkpoint.steps.settlement?.tx}`, () => client.getTriggeredTransactionIds({hash: settlementResult?.tx ?? checkpoint.steps.settlement?.tx}), true);
+      const triggered = await RPC_SCHEDULER.enqueue(`triggered:${settlementResult?.tx ?? checkpoint.steps.settlement?.tx}`, () => getTriggeredTransactionIds({client, hash: settlementResult?.tx ?? checkpoint.steps.settlement?.tx}), true);
       externalObservation = {status: Array.isArray(triggered) && triggered.length ? "TRIGGERED_IDS_OBSERVED" : "PARENT_FINALIZED_CHILD_NOT_EXPOSED", triggeredTransactionIds: triggered};
     } catch (error: any) { externalObservation = {status: "EXTERNAL_OBSERVATION_UNAVAILABLE", error: text(error?.message ?? error)}; }
     const finalMandateAccounting = accounting(await readContract(client, VAULT, "get_accounting", [MANDATE_ID]), "Final mandate");

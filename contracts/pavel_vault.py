@@ -289,6 +289,7 @@ class PavelVault(gl.Contract):
 
     def _settle(self, intent_id: str, direction: str) -> None:
         instruction = json.loads(self._core().view().get_settlement_instruction(intent_id))
+        self._require(direction in ("RELEASE_TO_COUNTERPARTY", "REFUND_TO_PRINCIPAL"), "unsupported settlement direction")
         self._require(instruction["direction"] == direction, "Core settlement direction does not authorize this operation")
         now = self._now()
         self._require(now["seconds"] >= u256(int(instruction["ready_at"])), "challenge window or settlement delay is still open")

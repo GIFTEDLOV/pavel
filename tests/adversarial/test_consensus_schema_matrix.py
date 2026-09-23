@@ -9,9 +9,7 @@ AUTH_FIELDS = [
     "constitution_satisfied",
 ]
 FULFILLMENT_FIELDS = [
-    "authorized_deliverable_identified", "provider_identity_consistent", "evidence_authentic",
-    "delivery_corresponds_to_intent", "quantity_consistent", "material_terms_satisfied",
-    "no_material_substitution", "completion_evidence_sufficient", "mandate_requirements_preserved",
+    "material_terms_satisfied", "completion_evidence_sufficient",
 ]
 DELEGATION_FIELDS = [
     "purpose_is_subset", "permitted_activity_is_subset", "forbidden_activity_not_weakened",
@@ -22,11 +20,11 @@ BAD_VALUES = [None, 0, 1, "true", "false", "", {}, []]
 
 
 def _authorization():
-    return {"schema": "pavel-authorization-v1", "explanation": "bounded", **{field: True for field in AUTH_FIELDS}}
+    return {"schema": "pavel-authorization-v2", **{field: True for field in AUTH_FIELDS}}
 
 
 def _fulfillment():
-    return {"schema": "pavel-fulfillment-v1", "outcome": "FULFILLED", "explanation": "bounded", **{field: True for field in FULFILLMENT_FIELDS}}
+    return {"schema": "pavel-fulfillment-v2", **{field: True for field in FULFILLMENT_FIELDS}}
 
 
 def _delegation():

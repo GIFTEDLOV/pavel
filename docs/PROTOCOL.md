@@ -16,7 +16,7 @@ Evidence definitions are append-only and bind kind, original HTTPS URL, authorit
 
 ## Authorization
 
-Authorization asks whether the frozen Intent complies with the frozen Mandate. The semantic vector contains only bounded booleans and a bounded explanation. Deterministic code checks caller, expiry, amount, recipient, Mandate status, registered identity, source authority, and evidence readiness. Authorization is separate from payment reservation.
+Authorization asks whether the frozen Intent complies with the frozen Mandate. V6 consensus contains only the `pavel-authorization-v2` schema and twelve JSON booleans. Deterministic Core code derives `AUTHORIZED` only when every field is true; otherwise it stores `REJECTED`, `AUTHORIZATION_CHECKS_FAILED`, and the ordered `failed_checks` field names. No LLM-generated prose is required for canonical correctness. Deterministic code checks caller, expiry, amount, recipient, Mandate status, registered identity, source authority, and evidence readiness. Authorization is separate from payment reservation.
 
 ## Reservation
 
@@ -24,7 +24,9 @@ Vault synchronously reads Core authorization and validates every frozen economic
 
 ## Fulfillment and disputes
 
-Core requires a matching Vault reservation before fulfillment review. Fulfillment evidence is appended to a later snapshot. The semantic result is FULFILLED, NOT_FULFILLED, or INDETERMINATE; only the first two produce precommitted release/refund directions.
+Core requires a matching Vault reservation before fulfillment review. Fulfillment evidence is appended to a later snapshot and must be fully authenticated within the explicit V7 bound of 4096 bytes; accepted fulfillment evidence is never passed to the semantic reviewer as an arbitrary prefix. Seven objective checks are derived from frozen Intent, Mandate, identity, reservation, evidence identity, hash, byte length, and authenticated capture state. Only `material_terms_satisfied` and `completion_evidence_sufficient` are sent to consensus as the exact three-key `pavel-fulfillment-v2` object. Core combines the objective checks and accepted semantic vector deterministically: all true produces `FULFILLED` with `RELEASE_TO_COUNTERPARTY`; any definitive false produces `NOT_FULFILLED` with `REFUND_TO_PRINCIPAL`.
+
+If semantic evaluation is malformed or unresolved, Core records `FULFILLMENT_RETRY_REQUIRED` without a settlement direction. Once the frozen fulfillment deadline passes, any caller may invoke `expire_fulfillment`; Core records `FULFILLMENT_EXPIRED` and the refund direction. Vault can execute only the direction returned by Core, and its one-shot settlement guard prevents double release/refund. Thus an unresolved assessment cannot permanently trap the reservation merely because validator rotations were exhausted.
 
 Any address may open a bounded challenge within the challenge window. The challenger must append properly formed challenge evidence and only its own evidence may be assessed. Challenge IDs are indexed per Intent, histories are append-only, and the oldest unresolved challenge has deterministic processing priority. Each challenge has its own fingerprint, evidence IDs, frozen independent snapshot, semantic result, status, and `resolved_at`. Every qualifying unresolved challenge blocks settlement; one challenge result cannot resolve another, and no owner can suppress a frozen third-party challenge.
 

@@ -71,3 +71,18 @@ execution-result source; Core finalized state proves no Mandate mutation
 both reconcile to `0xb2`. The local parser compatibility fix is committed,
 but the deployed bytecode remains the old source and therefore qualification-v2
 is historical until an explicitly authorized redeployment and source audit.
+
+## V7 live qualification
+
+The V7 source-verified pair is deployed on Studionet 61999:
+
+- Core `0xBA2356FfE5062506FA938da4715c03a2BE7929bF`, SHA-256
+  `4acc04c4b684b35058b793973eec75569af9e981eb84d33167198615255b785a`.
+- Vault `0x552167Cc0883D02ce42fA2aD64E29Cd10EE3eDFD`, SHA-256
+  `f671005e07a658a17a7711807d23fa56bf0d6e2e85d0a266eafc17b03455f15c`.
+
+The clean V7 lifecycle reached canonical `FULFILLED` and a Vault
+`RELEASE_PENDING` settlement request with external observation
+`UNCONFIRMED`. This is a truthful qualification result, not confirmation of an
+external transfer. The V7 release runner uses the pinned GenLayer CLI OS
+keychain cache without exposing or persisting signing material.

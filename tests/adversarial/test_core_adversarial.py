@@ -15,8 +15,8 @@ def test_prompt_injection_is_delimited_as_data(direct_vm, direct_deploy, direct_
     add_evidence(core, direct_vm, direct_alice, intent_id, body=injection)
     direct_vm.mock_web(r"evidence\.example/quote", {"status": 200, "body": injection})
     core.stage_evidence(intent_id)
-    all_true = {"schema": "pavel-authorization-v1", "explanation": "bounded", "purpose_aligned": True, "activity_permitted": True, "prohibited_activity_absent": True, "counterparty_scope_satisfied": True, "deliverable_in_scope": True, "commercial_terms_consistent": True, "evidence_semantically_sufficient": True, "duplicate_semantic_purchase_absent": True, "authority_scope_preserved": True, "fulfillment_terms_defined": True, "external_dependencies_disclosed": True, "constitution_satisfied": True}
-    direct_vm.mock_llm(r"pavel-authorization-v1", json.dumps(all_true))
+    all_true = {"schema": "pavel-authorization-v2", "purpose_aligned": True, "activity_permitted": True, "prohibited_activity_absent": True, "counterparty_scope_satisfied": True, "deliverable_in_scope": True, "commercial_terms_consistent": True, "evidence_semantically_sufficient": True, "duplicate_semantic_purchase_absent": True, "authority_scope_preserved": True, "fulfillment_terms_defined": True, "external_dependencies_disclosed": True, "constitution_satisfied": True}
+    direct_vm.mock_llm(r"pavel-authorization-v2", json.dumps(all_true))
     core.authorize_intent(intent_id)
     assert direct_vm.run_validator() is True
     assert json.loads(core.get_intent(intent_id))["status"] == "AUTHORIZED"

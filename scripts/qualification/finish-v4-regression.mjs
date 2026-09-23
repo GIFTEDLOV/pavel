@@ -56,4 +56,12 @@ test("finish runner uses native value, accounting invariants, and no debug RPC p
   assert.doesNotMatch(source, /debugTraceTransaction|gen_getTransactionReceipt|debug_traceTransaction/);
 });
 
-console.log("FINISH_V4_REGRESSION: 6 passed");
+test("payable deposit routes to Vault and the known failed hash is never replayed", () => {
+  assert.match(source, /\["deposit", "reserve", "request_release"\]\.includes\(functionName\).*VAULT/);
+  assert.match(source, /prepareKnownFailedDepositRecovery/);
+  assert.match(source, /historicalFailedTx: DEPOSIT_TX/);
+  assert.match(source, /correctedRecipient: VAULT/);
+  assert.match(source, /newHashRequired: true/);
+});
+
+console.log("FINISH_V4_REGRESSION: 7 passed");

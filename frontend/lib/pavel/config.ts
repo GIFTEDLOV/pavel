@@ -1,4 +1,5 @@
 import type { Address } from "./types";
+import { CORE_ADDRESS, VAULT_ADDRESS } from "./network";
 
 const addressPattern = /^0x[0-9a-fA-F]{40}$/;
 const historicalAddresses = new Set([
@@ -15,11 +16,11 @@ function configuredAddress(value: string | undefined, label: string): Address | 
 
 export function configuredContracts() {
   return {
-    core: configuredAddress(process.env.NEXT_PUBLIC_PAVEL_CORE_ADDRESS, "Core address"),
-    vault: configuredAddress(process.env.NEXT_PUBLIC_PAVEL_VAULT_ADDRESS, "Vault address"),
+    core: configuredAddress(process.env.NEXT_PUBLIC_PAVEL_CORE_ADDRESS ?? CORE_ADDRESS, "Core address"),
+    vault: configuredAddress(process.env.NEXT_PUBLIC_PAVEL_VAULT_ADDRESS ?? VAULT_ADDRESS, "Vault address"),
   };
 }
 
 export function qualificationLabel(): string {
-  return configuredContracts().core && configuredContracts().vault ? "Configured addresses are environment-provided; verify qualification provenance before production use." : "No contract addresses configured. This UI will not fabricate chain state.";
+  return configuredContracts().core && configuredContracts().vault ? "Live V7 Core/Vault pair is source-verified on Studionet 61999." : "No contract addresses configured. This UI will not fabricate chain state.";
 }
