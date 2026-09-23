@@ -1,0 +1,681 @@
+{
+  "proofVersion": "v7-canonical-readback-1",
+  "captureScript": "scripts/capture-v7-canonical-proof.mjs",
+  "capturedAt": "2026-09-23T17:13:16.600Z",
+  "network": "studionet",
+  "chainId": 61999,
+  "rpc": "https://studio.genlayer.com/api",
+  "core": "0xBA2356FfE5062506FA938da4715c03a2BE7929bF",
+  "vault": "0x552167Cc0883D02ce42fA2aD64E29Cd10EE3eDFD",
+  "transactionHashVariant": "LATEST_FINAL",
+  "canonicalQualificationState": "FULFILLED_RELEASE_PENDING_EXTERNAL_UNCONFIRMED",
+  "externalSettlementStatus": "UNCONFIRMED",
+  "binding": {
+    "coreVaultAddress": "0x552167cc0883d02ce42fa2ad64e29cd10ee3edfd",
+    "vaultCoreAddress": "0xba2356ffe5062506fa938da4715c03a2be7929bf"
+  },
+  "counts": {
+    "mandateCount": 1,
+    "intentCount": 1,
+    "coreHistoryLength": "10",
+    "vaultHistoryLength": "4"
+  },
+  "mandateIds": [
+    "M-1"
+  ],
+  "intentIds": [
+    "I-1"
+  ],
+  "qualifiedIdentities": {
+    "I-1": {
+      "principal": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+      "agent": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+      "mandateId": "M-1",
+      "counterpartyIdentityId": "C-1"
+    }
+  },
+  "mandates": {
+    "M-1": {
+      "allow_prior_reservations": false,
+      "authority_constraints": "docs.genlayer.com",
+      "authorized_agent": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+      "challenge_window_seconds": 60,
+      "constitution": "The principal retains control; only the registered agent may submit the bounded intent.",
+      "controller": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+      "created_at": "2026-09-23T09:49:46.511023Z",
+      "definition_hash": "9698579536f26e4fdd2654f7eb8960753537472b0a2dc1d8cfd8a88f82a6e78b",
+      "delegation_reviewed_at": "",
+      "delegation_status": "NOT_APPLICABLE",
+      "delegation_vector": "",
+      "epoch_budget": 1,
+      "epoch_duration_seconds": 86400,
+      "evidence_policy": "Authenticated HTTPS evidence with the committed URL, SHA-256, and byte length is required.",
+      "expires_at": 1790244285,
+      "forbidden_activity": "No unrelated activity, recipient change, budget expansion, substitution, or external transfer beyond exact artifact delivery.",
+      "fulfillment_policy": "Fulfillment requires delivery of the exact committed artifact with complete authenticated content.",
+      "mandate_id": "M-1",
+      "maximum_single_transaction": 1,
+      "parent_fingerprint": "",
+      "parent_mandate_id": "",
+      "permitted_activity": "Retrieve, authenticate, and deliver the exact official GenLayer Typical Use Cases artifact identified by its URL, SHA-256, and byte length.",
+      "principal": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+      "purpose": "Authorize retrieval, authentication, and delivery of the exact registered official GenLayer artifact.",
+      "recovery_policy": "Use only the approved docs.genlayer.com authority; unresolved fulfillment expires to refund.",
+      "revoked_at": "",
+      "sealed_at": "2026-09-23T09:51:03.265703Z",
+      "status": "SEALED",
+      "title": "PAVEL V7 exact artifact delivery qualification",
+      "total_budget": 1,
+      "valid_from": 1790157885
+    }
+  },
+  "intents": {
+    "I-1": {
+      "intent": {
+        "agent": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "amount": 1,
+        "authorization": {
+          "decision": "AUTHORIZED",
+          "failed_checks": [],
+          "intent_fingerprint": "100583a2c9e13b20048e04ac97068327510efb48e762a8f92a84e50a38f5d8f8",
+          "mandate_fingerprint": "9698579536f26e4fdd2654f7eb8960753537472b0a2dc1d8cfd8a88f82a6e78b",
+          "reason_code": "AUTHORIZED_ALL_CHECKS_PASSED",
+          "reviewed_at": "2026-09-23T10:07:33.283559Z",
+          "schema": "pavel-authorization-v2",
+          "semantic_schema_version": 2,
+          "snapshot_id": "S-1",
+          "vector": {
+            "activity_permitted": true,
+            "authority_scope_preserved": true,
+            "commercial_terms_consistent": true,
+            "constitution_satisfied": true,
+            "counterparty_scope_satisfied": true,
+            "deliverable_in_scope": true,
+            "duplicate_semantic_purchase_absent": true,
+            "evidence_semantically_sufficient": true,
+            "external_dependencies_disclosed": true,
+            "fulfillment_terms_defined": true,
+            "prohibited_activity_absent": true,
+            "purpose_aligned": true
+          }
+        },
+        "challenge_deadline": 1790158335,
+        "challenge_decision_id": "",
+        "commercial_terms": "Exactly 1 GEN qualification amount; no commercial expansion or substitution.",
+        "counterparty": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "counterparty_authority_origin": "docs.genlayer.com",
+        "counterparty_identity_fingerprint": "522fc57022b721e43203560d66ce2bc18101c6b4551c71372386c0ac49456d17",
+        "counterparty_identity_id": "C-1",
+        "created_at": "2026-09-23T10:04:46.728694Z",
+        "current_snapshot_id": "S-2",
+        "deliverable": "The deliverable is the complete authenticated artifact exact artifact URL=https://docs.genlayer.com/understand-genlayer-protocol/typical-use-cases.md; sha256=d00583b58c300822541b7f556c8ac4e97d3b2e5f5e9a0f3af97b753d6f70441d; byte_length=3988.",
+        "evidence_set_identity": "92c16d34261a172650fc2b962ba9770c67b78504bfbbf3559c1f0241c641be02",
+        "expires_at": 1790165085,
+        "fulfillment": {
+          "failed_checks": [],
+          "fulfillment_deadline": 1790165085,
+          "intent_fingerprint": "100583a2c9e13b20048e04ac97068327510efb48e762a8f92a84e50a38f5d8f8",
+          "mandate_fingerprint": "9698579536f26e4fdd2654f7eb8960753537472b0a2dc1d8cfd8a88f82a6e78b",
+          "objective_checks": {
+            "authorized_deliverable_identified": true,
+            "delivery_corresponds_to_intent": true,
+            "evidence_authentic": true,
+            "mandate_requirements_preserved": true,
+            "no_material_substitution": true,
+            "provider_identity_consistent": true,
+            "quantity_consistent": true
+          },
+          "result_status": "FULFILLED",
+          "reviewed_at": "2026-09-23T10:11:15.566666Z",
+          "schema": "pavel-fulfillment-v2",
+          "semantic_evaluation": "CONSENSUS_ACCEPTED",
+          "semantic_vector": {
+            "completion_evidence_sufficient": true,
+            "material_terms_satisfied": true
+          },
+          "snapshot_id": "S-2"
+        },
+        "fulfillment_criteria": "Completion requires the complete committed artifact and exact identity to be authenticated.",
+        "fulfillment_deadline": 1790165085,
+        "intent_fingerprint": "100583a2c9e13b20048e04ac97068327510efb48e762a8f92a84e50a38f5d8f8",
+        "intent_id": "I-1",
+        "last_error": "",
+        "mandate_id": "M-1",
+        "pre_challenge_status": "",
+        "principal": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "purpose": "Retrieve and deliver exact artifact URL=https://docs.genlayer.com/understand-genlayer-protocol/typical-use-cases.md; sha256=d00583b58c300822541b7f556c8ac4e97d3b2e5f5e9a0f3af97b753d6f70441d; byte_length=3988.",
+        "recipient": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "settlement_direction": "RELEASE_TO_COUNTERPARTY",
+        "settlement_ready_at": 1790158335,
+        "status": "FULFILLED",
+        "submitted_at": "2026-09-23T10:05:23.978805Z",
+        "title": "Exact GenLayer artifact delivery"
+      },
+      "authorization": {
+        "agent": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "allow_prior_reservations": false,
+        "amount": 1,
+        "authorization_decision": "AUTHORIZED",
+        "authorization_reason_code": "AUTHORIZED_ALL_CHECKS_PASSED",
+        "authorization_schema": "pavel-authorization-v2",
+        "counterparty": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "counterparty_authority_origin": "docs.genlayer.com",
+        "counterparty_identity_fingerprint": "522fc57022b721e43203560d66ce2bc18101c6b4551c71372386c0ac49456d17",
+        "counterparty_identity_id": "C-1",
+        "epoch_budget": 1,
+        "epoch_duration_seconds": 86400,
+        "failed_checks": [],
+        "intent_expires_at": 1790165085,
+        "intent_fingerprint": "100583a2c9e13b20048e04ac97068327510efb48e762a8f92a84e50a38f5d8f8",
+        "intent_id": "I-1",
+        "mandate_expires_at": 1790244285,
+        "mandate_fingerprint": "9698579536f26e4fdd2654f7eb8960753537472b0a2dc1d8cfd8a88f82a6e78b",
+        "mandate_id": "M-1",
+        "mandate_status": "SEALED",
+        "maximum_single_transaction": 1,
+        "principal": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "recipient": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "status": "FULFILLED",
+        "total_budget": 1
+      },
+      "reservation": {
+        "agent": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "amount": 1,
+        "counterparty": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "intent_fingerprint": "100583a2c9e13b20048e04ac97068327510efb48e762a8f92a84e50a38f5d8f8",
+        "intent_id": "I-1",
+        "mandate_id": "M-1",
+        "principal": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "recipient": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "reserved_at": "2026-09-23T10:08:34.983627Z",
+        "settlement_id": "SETTLE:V1:53a7547d4563326bb5292b8f889e77374746a42b8d7bdc56ff97d02c138c5915",
+        "status": "RELEASE_PENDING"
+      },
+      "settlementInstruction": {
+        "amount": 1,
+        "challenge_deadline": 1790158335,
+        "direction": "RELEASE_TO_COUNTERPARTY",
+        "fulfillment_deadline": 1790165085,
+        "fulfillment_result": {
+          "failed_checks": [],
+          "fulfillment_deadline": 1790165085,
+          "intent_fingerprint": "100583a2c9e13b20048e04ac97068327510efb48e762a8f92a84e50a38f5d8f8",
+          "mandate_fingerprint": "9698579536f26e4fdd2654f7eb8960753537472b0a2dc1d8cfd8a88f82a6e78b",
+          "objective_checks": {
+            "authorized_deliverable_identified": true,
+            "delivery_corresponds_to_intent": true,
+            "evidence_authentic": true,
+            "mandate_requirements_preserved": true,
+            "no_material_substitution": true,
+            "provider_identity_consistent": true,
+            "quantity_consistent": true
+          },
+          "result_status": "FULFILLED",
+          "reviewed_at": "2026-09-23T10:11:15.566666Z",
+          "schema": "pavel-fulfillment-v2",
+          "semantic_evaluation": "CONSENSUS_ACCEPTED",
+          "semantic_vector": {
+            "completion_evidence_sufficient": true,
+            "material_terms_satisfied": true
+          },
+          "snapshot_id": "S-2"
+        },
+        "intent_fingerprint": "100583a2c9e13b20048e04ac97068327510efb48e762a8f92a84e50a38f5d8f8",
+        "intent_id": "I-1",
+        "mandate_id": "M-1",
+        "oldest_open_challenge": "",
+        "principal": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "ready_at": 1790158335,
+        "recipient": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "status": "FULFILLED"
+      },
+      "settlement": {
+        "amount": 1,
+        "direction": "RELEASE_TO_COUNTERPARTY",
+        "external_observation": "UNCONFIRMED",
+        "intent_id": "I-1",
+        "mandate_id": "M-1",
+        "recipient": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "replay_key": "SETTLE:V1:53a7547d4563326bb5292b8f889e77374746a42b8d7bdc56ff97d02c138c5915",
+        "requested_at": "2026-09-23T10:12:19.559328Z",
+        "settlement_id": "SETTLE:V1:53a7547d4563326bb5292b8f889e77374746a42b8d7bdc56ff97d02c138c5915",
+        "status": "RELEASE_PENDING"
+      },
+      "evidence": {
+        "approved_recovery_authority": "docs.genlayer.com",
+        "challenge_id": "",
+        "committed_byte_length": 3988,
+        "committed_sha256": "d00583b58c300822541b7f556c8ac4e97d3b2e5f5e9a0f3af97b753d6f70441d",
+        "created_at": "2026-09-23T10:06:06.467050Z",
+        "evidence_id": "E-1",
+        "evidence_kind": "PRODUCT_SERVICE",
+        "expected_authority": "docs.genlayer.com",
+        "expected_hash": "d00583b58c300822541b7f556c8ac4e97d3b2e5f5e9a0f3af97b753d6f70441d",
+        "identity_fingerprint": "dcad956ccb5df9acb4de546f5ee13dfee1813654bd1f2d8e918355ff9a9fefb4",
+        "intent_id": "I-1",
+        "mandate_id": "M-1",
+        "origin_url": "https://docs.genlayer.com/understand-genlayer-protocol/typical-use-cases.md",
+        "policy_fingerprint": "100583a2c9e13b20048e04ac97068327510efb48e762a8f92a84e50a38f5d8f8",
+        "sequence": 0
+      }
+    }
+  },
+  "accounting": {
+    "M-1": {
+      "available": 0,
+      "committed": 1,
+      "conserved": true,
+      "deposited": 1,
+      "epoch_spent": 1,
+      "epoch_start": 1790157101,
+      "mandate_id": "M-1",
+      "recovered": 0,
+      "refund_pending": 0,
+      "release_pending": 1,
+      "reserved": 0
+    }
+  },
+  "globalAccounting": {
+    "available": 0,
+    "conserved": true,
+    "deposited": 1,
+    "recovered": 0,
+    "refund_pending": 0,
+    "release_pending": 1,
+    "reserved": 0
+  },
+  "readCount": 17,
+  "writeCount": 0,
+  "reads": [
+    {
+      "contract": "Core",
+      "address": "0xBA2356FfE5062506FA938da4715c03a2BE7929bF",
+      "method": "get_vault_address",
+      "args": [],
+      "transactionHashVariant": "LATEST_FINAL",
+      "observed": "0x552167cc0883d02ce42fa2ad64e29cd10ee3edfd"
+    },
+    {
+      "contract": "Vault",
+      "address": "0x552167Cc0883D02ce42fA2aD64E29Cd10EE3eDFD",
+      "method": "get_core_address",
+      "args": [],
+      "transactionHashVariant": "LATEST_FINAL",
+      "observed": "0xba2356ffe5062506fa938da4715c03a2be7929bf"
+    },
+    {
+      "contract": "Core",
+      "address": "0xBA2356FfE5062506FA938da4715c03a2BE7929bF",
+      "method": "get_mandate_count",
+      "args": [],
+      "transactionHashVariant": "LATEST_FINAL",
+      "observed": 1
+    },
+    {
+      "contract": "Core",
+      "address": "0xBA2356FfE5062506FA938da4715c03a2BE7929bF",
+      "method": "get_intent_count",
+      "args": [],
+      "transactionHashVariant": "LATEST_FINAL",
+      "observed": 1
+    },
+    {
+      "contract": "Core",
+      "address": "0xBA2356FfE5062506FA938da4715c03a2BE7929bF",
+      "method": "get_history_length",
+      "args": [],
+      "transactionHashVariant": "LATEST_FINAL",
+      "observed": 10
+    },
+    {
+      "contract": "Vault",
+      "address": "0x552167Cc0883D02ce42fA2aD64E29Cd10EE3eDFD",
+      "method": "get_history_length",
+      "args": [],
+      "transactionHashVariant": "LATEST_FINAL",
+      "observed": 4
+    },
+    {
+      "contract": "Core",
+      "address": "0xBA2356FfE5062506FA938da4715c03a2BE7929bF",
+      "method": "get_mandate_id",
+      "args": [
+        "0"
+      ],
+      "transactionHashVariant": "LATEST_FINAL",
+      "observed": "M-1"
+    },
+    {
+      "contract": "Core",
+      "address": "0xBA2356FfE5062506FA938da4715c03a2BE7929bF",
+      "method": "get_intent_id",
+      "args": [
+        "0"
+      ],
+      "transactionHashVariant": "LATEST_FINAL",
+      "observed": "I-1"
+    },
+    {
+      "contract": "Core",
+      "address": "0xBA2356FfE5062506FA938da4715c03a2BE7929bF",
+      "method": "get_mandate",
+      "args": [
+        "M-1"
+      ],
+      "transactionHashVariant": "LATEST_FINAL",
+      "observed": {
+        "allow_prior_reservations": false,
+        "authority_constraints": "docs.genlayer.com",
+        "authorized_agent": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "challenge_window_seconds": 60,
+        "constitution": "The principal retains control; only the registered agent may submit the bounded intent.",
+        "controller": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "created_at": "2026-09-23T09:49:46.511023Z",
+        "definition_hash": "9698579536f26e4fdd2654f7eb8960753537472b0a2dc1d8cfd8a88f82a6e78b",
+        "delegation_reviewed_at": "",
+        "delegation_status": "NOT_APPLICABLE",
+        "delegation_vector": "",
+        "epoch_budget": 1,
+        "epoch_duration_seconds": 86400,
+        "evidence_policy": "Authenticated HTTPS evidence with the committed URL, SHA-256, and byte length is required.",
+        "expires_at": 1790244285,
+        "forbidden_activity": "No unrelated activity, recipient change, budget expansion, substitution, or external transfer beyond exact artifact delivery.",
+        "fulfillment_policy": "Fulfillment requires delivery of the exact committed artifact with complete authenticated content.",
+        "mandate_id": "M-1",
+        "maximum_single_transaction": 1,
+        "parent_fingerprint": "",
+        "parent_mandate_id": "",
+        "permitted_activity": "Retrieve, authenticate, and deliver the exact official GenLayer Typical Use Cases artifact identified by its URL, SHA-256, and byte length.",
+        "principal": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "purpose": "Authorize retrieval, authentication, and delivery of the exact registered official GenLayer artifact.",
+        "recovery_policy": "Use only the approved docs.genlayer.com authority; unresolved fulfillment expires to refund.",
+        "revoked_at": "",
+        "sealed_at": "2026-09-23T09:51:03.265703Z",
+        "status": "SEALED",
+        "title": "PAVEL V7 exact artifact delivery qualification",
+        "total_budget": 1,
+        "valid_from": 1790157885
+      }
+    },
+    {
+      "contract": "Vault",
+      "address": "0x552167Cc0883D02ce42fA2aD64E29Cd10EE3eDFD",
+      "method": "get_accounting",
+      "args": [
+        "M-1"
+      ],
+      "transactionHashVariant": "LATEST_FINAL",
+      "observed": {
+        "available": 0,
+        "committed": 1,
+        "conserved": true,
+        "deposited": 1,
+        "epoch_spent": 1,
+        "epoch_start": 1790157101,
+        "mandate_id": "M-1",
+        "recovered": 0,
+        "refund_pending": 0,
+        "release_pending": 1,
+        "reserved": 0
+      }
+    },
+    {
+      "contract": "Vault",
+      "address": "0x552167Cc0883D02ce42fA2aD64E29Cd10EE3eDFD",
+      "method": "get_global_accounting",
+      "args": [],
+      "transactionHashVariant": "LATEST_FINAL",
+      "observed": {
+        "available": 0,
+        "conserved": true,
+        "deposited": 1,
+        "recovered": 0,
+        "refund_pending": 0,
+        "release_pending": 1,
+        "reserved": 0
+      }
+    },
+    {
+      "contract": "Core",
+      "address": "0xBA2356FfE5062506FA938da4715c03a2BE7929bF",
+      "method": "get_intent",
+      "args": [
+        "I-1"
+      ],
+      "transactionHashVariant": "LATEST_FINAL",
+      "observed": {
+        "agent": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "amount": 1,
+        "authorization": {
+          "decision": "AUTHORIZED",
+          "failed_checks": [],
+          "intent_fingerprint": "100583a2c9e13b20048e04ac97068327510efb48e762a8f92a84e50a38f5d8f8",
+          "mandate_fingerprint": "9698579536f26e4fdd2654f7eb8960753537472b0a2dc1d8cfd8a88f82a6e78b",
+          "reason_code": "AUTHORIZED_ALL_CHECKS_PASSED",
+          "reviewed_at": "2026-09-23T10:07:33.283559Z",
+          "schema": "pavel-authorization-v2",
+          "semantic_schema_version": 2,
+          "snapshot_id": "S-1",
+          "vector": {
+            "activity_permitted": true,
+            "authority_scope_preserved": true,
+            "commercial_terms_consistent": true,
+            "constitution_satisfied": true,
+            "counterparty_scope_satisfied": true,
+            "deliverable_in_scope": true,
+            "duplicate_semantic_purchase_absent": true,
+            "evidence_semantically_sufficient": true,
+            "external_dependencies_disclosed": true,
+            "fulfillment_terms_defined": true,
+            "prohibited_activity_absent": true,
+            "purpose_aligned": true
+          }
+        },
+        "challenge_deadline": 1790158335,
+        "challenge_decision_id": "",
+        "commercial_terms": "Exactly 1 GEN qualification amount; no commercial expansion or substitution.",
+        "counterparty": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "counterparty_authority_origin": "docs.genlayer.com",
+        "counterparty_identity_fingerprint": "522fc57022b721e43203560d66ce2bc18101c6b4551c71372386c0ac49456d17",
+        "counterparty_identity_id": "C-1",
+        "created_at": "2026-09-23T10:04:46.728694Z",
+        "current_snapshot_id": "S-2",
+        "deliverable": "The deliverable is the complete authenticated artifact exact artifact URL=https://docs.genlayer.com/understand-genlayer-protocol/typical-use-cases.md; sha256=d00583b58c300822541b7f556c8ac4e97d3b2e5f5e9a0f3af97b753d6f70441d; byte_length=3988.",
+        "evidence_set_identity": "92c16d34261a172650fc2b962ba9770c67b78504bfbbf3559c1f0241c641be02",
+        "expires_at": 1790165085,
+        "fulfillment": {
+          "failed_checks": [],
+          "fulfillment_deadline": 1790165085,
+          "intent_fingerprint": "100583a2c9e13b20048e04ac97068327510efb48e762a8f92a84e50a38f5d8f8",
+          "mandate_fingerprint": "9698579536f26e4fdd2654f7eb8960753537472b0a2dc1d8cfd8a88f82a6e78b",
+          "objective_checks": {
+            "authorized_deliverable_identified": true,
+            "delivery_corresponds_to_intent": true,
+            "evidence_authentic": true,
+            "mandate_requirements_preserved": true,
+            "no_material_substitution": true,
+            "provider_identity_consistent": true,
+            "quantity_consistent": true
+          },
+          "result_status": "FULFILLED",
+          "reviewed_at": "2026-09-23T10:11:15.566666Z",
+          "schema": "pavel-fulfillment-v2",
+          "semantic_evaluation": "CONSENSUS_ACCEPTED",
+          "semantic_vector": {
+            "completion_evidence_sufficient": true,
+            "material_terms_satisfied": true
+          },
+          "snapshot_id": "S-2"
+        },
+        "fulfillment_criteria": "Completion requires the complete committed artifact and exact identity to be authenticated.",
+        "fulfillment_deadline": 1790165085,
+        "intent_fingerprint": "100583a2c9e13b20048e04ac97068327510efb48e762a8f92a84e50a38f5d8f8",
+        "intent_id": "I-1",
+        "last_error": "",
+        "mandate_id": "M-1",
+        "pre_challenge_status": "",
+        "principal": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "purpose": "Retrieve and deliver exact artifact URL=https://docs.genlayer.com/understand-genlayer-protocol/typical-use-cases.md; sha256=d00583b58c300822541b7f556c8ac4e97d3b2e5f5e9a0f3af97b753d6f70441d; byte_length=3988.",
+        "recipient": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "settlement_direction": "RELEASE_TO_COUNTERPARTY",
+        "settlement_ready_at": 1790158335,
+        "status": "FULFILLED",
+        "submitted_at": "2026-09-23T10:05:23.978805Z",
+        "title": "Exact GenLayer artifact delivery"
+      }
+    },
+    {
+      "contract": "Core",
+      "address": "0xBA2356FfE5062506FA938da4715c03a2BE7929bF",
+      "method": "get_authorization_for_vault",
+      "args": [
+        "I-1"
+      ],
+      "transactionHashVariant": "LATEST_FINAL",
+      "observed": {
+        "agent": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "allow_prior_reservations": false,
+        "amount": 1,
+        "authorization_decision": "AUTHORIZED",
+        "authorization_reason_code": "AUTHORIZED_ALL_CHECKS_PASSED",
+        "authorization_schema": "pavel-authorization-v2",
+        "counterparty": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "counterparty_authority_origin": "docs.genlayer.com",
+        "counterparty_identity_fingerprint": "522fc57022b721e43203560d66ce2bc18101c6b4551c71372386c0ac49456d17",
+        "counterparty_identity_id": "C-1",
+        "epoch_budget": 1,
+        "epoch_duration_seconds": 86400,
+        "failed_checks": [],
+        "intent_expires_at": 1790165085,
+        "intent_fingerprint": "100583a2c9e13b20048e04ac97068327510efb48e762a8f92a84e50a38f5d8f8",
+        "intent_id": "I-1",
+        "mandate_expires_at": 1790244285,
+        "mandate_fingerprint": "9698579536f26e4fdd2654f7eb8960753537472b0a2dc1d8cfd8a88f82a6e78b",
+        "mandate_id": "M-1",
+        "mandate_status": "SEALED",
+        "maximum_single_transaction": 1,
+        "principal": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "recipient": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "status": "FULFILLED",
+        "total_budget": 1
+      }
+    },
+    {
+      "contract": "Vault",
+      "address": "0x552167Cc0883D02ce42fA2aD64E29Cd10EE3eDFD",
+      "method": "get_reservation",
+      "args": [
+        "I-1"
+      ],
+      "transactionHashVariant": "LATEST_FINAL",
+      "observed": {
+        "agent": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "amount": 1,
+        "counterparty": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "intent_fingerprint": "100583a2c9e13b20048e04ac97068327510efb48e762a8f92a84e50a38f5d8f8",
+        "intent_id": "I-1",
+        "mandate_id": "M-1",
+        "principal": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "recipient": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "reserved_at": "2026-09-23T10:08:34.983627Z",
+        "settlement_id": "SETTLE:V1:53a7547d4563326bb5292b8f889e77374746a42b8d7bdc56ff97d02c138c5915",
+        "status": "RELEASE_PENDING"
+      }
+    },
+    {
+      "contract": "Core",
+      "address": "0xBA2356FfE5062506FA938da4715c03a2BE7929bF",
+      "method": "get_settlement_instruction",
+      "args": [
+        "I-1"
+      ],
+      "transactionHashVariant": "LATEST_FINAL",
+      "observed": {
+        "amount": 1,
+        "challenge_deadline": 1790158335,
+        "direction": "RELEASE_TO_COUNTERPARTY",
+        "fulfillment_deadline": 1790165085,
+        "fulfillment_result": {
+          "failed_checks": [],
+          "fulfillment_deadline": 1790165085,
+          "intent_fingerprint": "100583a2c9e13b20048e04ac97068327510efb48e762a8f92a84e50a38f5d8f8",
+          "mandate_fingerprint": "9698579536f26e4fdd2654f7eb8960753537472b0a2dc1d8cfd8a88f82a6e78b",
+          "objective_checks": {
+            "authorized_deliverable_identified": true,
+            "delivery_corresponds_to_intent": true,
+            "evidence_authentic": true,
+            "mandate_requirements_preserved": true,
+            "no_material_substitution": true,
+            "provider_identity_consistent": true,
+            "quantity_consistent": true
+          },
+          "result_status": "FULFILLED",
+          "reviewed_at": "2026-09-23T10:11:15.566666Z",
+          "schema": "pavel-fulfillment-v2",
+          "semantic_evaluation": "CONSENSUS_ACCEPTED",
+          "semantic_vector": {
+            "completion_evidence_sufficient": true,
+            "material_terms_satisfied": true
+          },
+          "snapshot_id": "S-2"
+        },
+        "intent_fingerprint": "100583a2c9e13b20048e04ac97068327510efb48e762a8f92a84e50a38f5d8f8",
+        "intent_id": "I-1",
+        "mandate_id": "M-1",
+        "oldest_open_challenge": "",
+        "principal": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "ready_at": 1790158335,
+        "recipient": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "status": "FULFILLED"
+      }
+    },
+    {
+      "contract": "Vault",
+      "address": "0x552167Cc0883D02ce42fA2aD64E29Cd10EE3eDFD",
+      "method": "get_settlement",
+      "args": [
+        "SETTLE:V1:53a7547d4563326bb5292b8f889e77374746a42b8d7bdc56ff97d02c138c5915"
+      ],
+      "transactionHashVariant": "LATEST_FINAL",
+      "observed": {
+        "amount": 1,
+        "direction": "RELEASE_TO_COUNTERPARTY",
+        "external_observation": "UNCONFIRMED",
+        "intent_id": "I-1",
+        "mandate_id": "M-1",
+        "recipient": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "replay_key": "SETTLE:V1:53a7547d4563326bb5292b8f889e77374746a42b8d7bdc56ff97d02c138c5915",
+        "requested_at": "2026-09-23T10:12:19.559328Z",
+        "settlement_id": "SETTLE:V1:53a7547d4563326bb5292b8f889e77374746a42b8d7bdc56ff97d02c138c5915",
+        "status": "RELEASE_PENDING"
+      }
+    },
+    {
+      "contract": "Core",
+      "address": "0xBA2356FfE5062506FA938da4715c03a2BE7929bF",
+      "method": "get_evidence",
+      "args": [
+        "I-1",
+        "0"
+      ],
+      "transactionHashVariant": "LATEST_FINAL",
+      "observed": {
+        "approved_recovery_authority": "docs.genlayer.com",
+        "challenge_id": "",
+        "committed_byte_length": 3988,
+        "committed_sha256": "d00583b58c300822541b7f556c8ac4e97d3b2e5f5e9a0f3af97b753d6f70441d",
+        "created_at": "2026-09-23T10:06:06.467050Z",
+        "evidence_id": "E-1",
+        "evidence_kind": "PRODUCT_SERVICE",
+        "expected_authority": "docs.genlayer.com",
+        "expected_hash": "d00583b58c300822541b7f556c8ac4e97d3b2e5f5e9a0f3af97b753d6f70441d",
+        "identity_fingerprint": "dcad956ccb5df9acb4de546f5ee13dfee1813654bd1f2d8e918355ff9a9fefb4",
+        "intent_id": "I-1",
+        "mandate_id": "M-1",
+        "origin_url": "https://docs.genlayer.com/understand-genlayer-protocol/typical-use-cases.md",
+        "policy_fingerprint": "100583a2c9e13b20048e04ac97068327510efb48e762a8f92a84e50a38f5d8f8",
+        "sequence": 0
+      }
+    }
+  ]
+}

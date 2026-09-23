@@ -1,0 +1,13 @@
+{
+  "proofVersion": "v7-canonical-readback-1",
+  "network": "studionet",
+  "chainId": 61999,
+  "rpc": "https://studio.genlayer.com/api",
+  "transactionHashVariant": "LATEST_FINAL",
+  "captureScript": "scripts/capture-v7-canonical-proof.mjs",
+  "readbackFile": "deployments/studionet/qualification-v7/canonical-readback.json",
+  "readCount": 17,
+  "writeCount": 0,
+  "canonicalQualificationState": "FULFILLED_RELEASE_PENDING_EXTERNAL_UNCONFIRMED",
+  "externalSettlementStatus": "UNCONFIRMED"
+}

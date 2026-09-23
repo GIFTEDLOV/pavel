@@ -92,6 +92,9 @@ jobs:
       - name: Current V7 qualification validation
         run: python scripts/validate-qualification-v7.py
 
+      - name: Stable release-family compatibility validation
+        run: node scripts/validate-release-family.mjs
+
   frontend:
     runs-on: ubuntu-latest
     steps:
