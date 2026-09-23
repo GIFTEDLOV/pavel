@@ -17,6 +17,8 @@ $excludedGlobs = @(
     '!**/coverage/**',
     '!**/cache/**',
     '!**/.cache/**',
+    '!**/playwright-report/**',
+    '!**/test-results/**',
     '!**/__pycache__/**',
     '!**/.pytest_cache/**',
     '!.test-artifacts/**',
@@ -80,7 +82,7 @@ if ($null -ne $rg) {
 $excludedDirectories = @(
     '.git', 'node_modules', '.pnpm', '.venv', 'venv', '.next', 'dist', 'build',
     'coverage', 'cache', '.cache', '__pycache__', '.pytest_cache',
-    '.test-artifacts', 'artifacts'
+    '.test-artifacts', 'artifacts', 'playwright-report', 'test-results'
 )
 function Get-ScanFiles([string]$directory) {
     foreach ($entry in Get-ChildItem -LiteralPath $directory -Force) {
@@ -105,8 +107,11 @@ foreach ($file in $files) {
         $lineNumber++
         $lineMatches = [regex]::Matches($line, $pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
         if ($lineMatches.Count -gt 0) {
-            $found = $true
-            Write-SafeMatch $display $lineNumber $line
+            $safeMatches = @(Write-SafeMatch $display $lineNumber $line)
+            if ($safeMatches.Count -gt 0) {
+                $found = $true
+                $safeMatches
+            }
         }
     }
 }
