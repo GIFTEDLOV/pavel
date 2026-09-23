@@ -1,0 +1,35 @@
+{
+  "network": "studionet",
+  "chainId": 61999,
+  "genlayerJs": "1.1.8",
+  "consensusFamily": "stable-pre-v0.6",
+  "v06FeeProfileApi": false,
+  "studioDevMigrationRequiredForV06Rc": true,
+  "exactPackageInspection": {
+    "packageVersion": "1.1.8",
+    "npmGitHead": "a76bec395aaa927720ee0ce364899a64044dd43e",
+    "repository": "https://github.com/genlayerlabs/genlayer-js.git",
+    "repositoryTag": "v1.1.8",
+    "repositoryTagObject": "573e6bbc9c3aa7d3e40c37505d0a83a1ab1182c1",
+    "repositoryTagCommit": "4303db00c428d57c6d8e5b04a75043ea42d4b0e",
+    "inspectedFiles": [
+      "frontend/node_modules/genlayer-js/package.json",
+      "frontend/node_modules/genlayer-js/dist/index-C3Ul1Rte.d.ts"
+    ]
+  },
+  "stableCapabilities": {
+    "estimateTransactionGas": true,
+    "getCurrentFeePolicy": false,
+    "estimateTransactionFees": false,
+    "estimateTransactionFeesForWrite": false,
+    "TransactionFeeOptions": false
+  },
+  "v06RcFamily": {
+    "genlayerJs": "2.0.0-rc.x",
+    "genlayerPy": "0.19.x-rc",
+    "genlayerCli": "0.40.x-rc",
+    "network": "studio-dev",
+    "chainId": 61997,
+    "mixedIntoPavelV7": false
+  }
+}
