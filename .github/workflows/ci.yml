@@ -145,7 +145,7 @@ jobs:
           cache-dependency-path: pnpm-lock.yaml
 
       - name: Install Node qualification dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Full Node qualification suite
         run: node scripts/run-node-qualification.mjs

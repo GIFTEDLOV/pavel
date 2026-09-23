@@ -27,7 +27,7 @@ test("local full lifecycle simulation proves accounting and external observation
 
 test("runner preflights native value and postconditions for the exact positive flow", () => {
   assert.match(runnerSource, /functionName: "deposit"[^\n]+value: 1n/);
-  assert.match(runnerSource, /Finalized deposit did not produce exactly one available GEN/);
+  assert.match(runnerSource, /Finalized deposit did not produce exactly one available smallest native GEN unit/);
   assert.match(runnerSource, /Positive reservation readback mismatch/);
   assert.match(runnerSource, /Positive fulfillment did not complete/);
   assert.match(runnerSource, /Vault release postcondition is not RELEASE_PENDING/);
