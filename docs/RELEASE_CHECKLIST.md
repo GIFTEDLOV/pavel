@@ -11,7 +11,7 @@ runtime configuration.
 - [x] Python compile, Direct Mode, adversarial, property, and state-machine tests pass serially.
 - [x] GenVM lint, validation, schema, typecheck, and Core/Vault interface parity pass.
 - [x] Frontend tests, typecheck, lint, and production build pass.
-- [ ] Browser E2E — unavailable in the release environment; HTTP and route smoke pass.
+- [x] Browser E2E — production Playwright audit passes at 1440px desktop, 430px mobile, and 390px mobile widths.
 - [x] Network guard, manifest validation, source hash gate, and secret scan pass.
 - [x] V7 Core and Vault finalize with successful execution.
 - [x] Exact deployed-source parity is established for both contracts.

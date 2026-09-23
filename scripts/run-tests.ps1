@@ -22,8 +22,7 @@ $nodeTests = @(
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
-$python = Join-Path $PSScriptRoot "..\.venv\Scripts\python.exe"
-& $python -m pytest -q --artifacts-dir .test-artifacts
+python -m pytest -q --artifacts-dir .test-artifacts
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }

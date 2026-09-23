@@ -1,48 +1,160 @@
-name: pavel-local-gates
+name: pavel-release-gates
 
 on:
   push:
   pull_request:
+
+permissions:
+  contents: read
+
+env:
+  GENVM_VERSION: v0.2.16
 
 jobs:
   contracts:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.14'
-      - run: python -m pip install -r requirements-direct.txt
-      - run: $env:GENVM_VERSION='v0.2.16'; python scripts/compile-contracts.py
-      - run: $env:GENVM_VERSION='v0.2.16'; pytest -q
-      - run: powershell -ExecutionPolicy Bypass -File scripts/lint-contracts.ps1
-      - run: python scripts/core-vault-interface-parity.py
-      - run: python scripts/address-calldata-parity.py
-      - run: node scripts/semantic-authority-audit.mjs
-      - run: $env:PATH="$pwd\.venv\Scripts;$env:PATH"; $env:GENVM_VERSION='v0.2.16'; .venv/Scripts/genvm-lint.exe schema contracts/pavel_core.py --json
-      - run: $env:PATH="$pwd\.venv\Scripts;$env:PATH"; $env:GENVM_VERSION='v0.2.16'; .venv/Scripts/genvm-lint.exe schema contracts/pavel_vault.py --json
-      - run: $env:PATH="$pwd\.venv\Scripts;$env:PATH"; $env:GENVM_VERSION='v0.2.16'; .venv/Scripts/genvm-lint.exe typecheck contracts/pavel_core.py --json
-      - run: $env:PATH="$pwd\.venv\Scripts;$env:PATH"; $env:GENVM_VERSION='v0.2.16'; .venv/Scripts/genvm-lint.exe typecheck contracts/pavel_vault.py --json
-      - run: powershell -ExecutionPolicy Bypass -File scripts/secret-scan.ps1
-      - run: node scripts/contract-source-hash.mjs
-      - run: node tools/qualification/validate-manifest.mjs
-      - run: python scripts/validate-deployment-manifest.py
-      - run: python scripts/validate-qualification-v2.py
+          cache: pip
+          cache-dependency-path: requirements-direct.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.0
+
+      - name: Install pinned contract toolchain
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-direct.txt
+          python -m pip check
+
+      - name: Compile contracts
+        run: python scripts/compile-contracts.py
+
+      - name: Full Python suite
+        run: python -m pytest -q --artifacts-dir .test-artifacts
+
+      - name: Direct Mode suite
+        run: python -m pytest -q tests/direct
+
+      - name: Adversarial suite
+        run: python -m pytest -q tests/adversarial
+
+      - name: Property and state-machine suite
+        run: python -m pytest -q tests/property
+
+      - name: Contract lint
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File scripts/lint-contracts.ps1
+
+      - name: Core and Vault interface parity
+        run: python scripts/core-vault-interface-parity.py
+
+      - name: Address and calldata parity
+        run: python scripts/address-calldata-parity.py
+
+      - name: Semantic authority audit
+        run: node scripts/semantic-authority-audit.mjs
+
+      - name: Core schema validation
+        run: genvm-lint schema contracts/pavel_core.py --json
+
+      - name: Vault schema validation
+        run: genvm-lint schema contracts/pavel_vault.py --json
+
+      - name: Core typecheck
+        run: genvm-lint typecheck contracts/pavel_core.py --json
+
+      - name: Vault typecheck
+        run: genvm-lint typecheck contracts/pavel_vault.py --json
+
+      - name: Secret scan
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File scripts/secret-scan.ps1
+
+      - name: Source hash gate
+        run: node scripts/contract-source-hash.mjs
+
+      - name: Deployment manifest schema
+        run: node tools/qualification/validate-manifest.mjs
+
+      - name: Deployment manifest validation
+        run: python scripts/validate-deployment-manifest.py
+
+      - name: Qualification validation
+        run: python scripts/validate-qualification-v2.py
+
   frontend:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: pnpm/action-setup@v4
         with:
           version: 11.0.9
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24.14.0
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
-      - run: pnpm --dir frontend install --frozen-lockfile
-      - run: pnpm --dir frontend typecheck
-      - run: pnpm --dir frontend lint
-      - run: pnpm --dir frontend test
-      - run: pnpm --dir frontend build
-      - run: node scripts/network-guard.mjs
+
+      - name: Install frontend dependencies
+        run: pnpm --dir frontend install --frozen-lockfile
+
+      - name: Frontend typecheck
+        run: pnpm --dir frontend typecheck
+
+      - name: Frontend lint
+        run: pnpm --dir frontend lint
+
+      - name: Frontend tests
+        run: pnpm --dir frontend test
+
+      - name: Frontend production build
+        run: pnpm --dir frontend build
+
+      - name: Network guard
+        run: node scripts/network-guard.mjs
+
+      - name: Secret scan
+        shell: pwsh
+        run: pwsh -File scripts/secret-scan.ps1
+
+  browser-e2e:
+    runs-on: ubuntu-latest
+    needs: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.0.9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.0
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        run: pnpm --dir frontend install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm --dir frontend exec playwright install --with-deps chromium
+
+      - name: Run browser release audit
+        run: pnpm --dir frontend e2e
+
+      - name: Upload browser screenshots and traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pavel-browser-audit
+          path: frontend/test-results
+          if-no-files-found: warn

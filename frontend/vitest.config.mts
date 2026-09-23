@@ -5,6 +5,9 @@ import { fileURLToPath } from "node:url";
 const root = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
+  test: {
+    include: ["tests/**/*.test.{ts,tsx}"],
+  },
   resolve: {
     alias: {
       "@": root,
