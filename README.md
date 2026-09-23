@@ -32,6 +32,7 @@ accounting, and Core-directed settlement.
 | --- | --- |
 | Network | GenLayer Studionet |
 | Chain ID | `61999` |
+| GEN denomination | `1 GEN = 10^18` smallest native units |
 | Core | `0xBA2356FfE5062506FA938da4715c03a2BE7929bF` |
 | Vault | `0x552167Cc0883D02ce42fA2aD64E29Cd10EE3eDFD` |
 | Authorization | `pavel-authorization-v2` |
@@ -361,17 +362,18 @@ The release gates include:
 | Property tests | `PASS` |
 | Mutation tests | `PASS` |
 | GenVM lint / validation / schema / typecheck | `PASS` |
-| Frontend tests | `58 passed` |
+| Full Node qualification gate | `111 passed` |
+| Frontend tests | `77 passed` |
 | Typecheck / lint / build | `PASS` |
 | Network guard | `PASS` |
 | Secret scan | `PASS` |
 | Source parity | `PASS` |
 | Canonical read smoke | `PASS` |
-| Browser E2E | `UNAVAILABLE_ENVIRONMENT` |
+| Browser E2E | `15 passed` — desktop 1440px, mobile 430px, mobile 390px |
 
-Browser E2E is not represented as a pass because no browser executable was
-available in the release environment. HTTP route smoke and canonical RPC
-readback were completed instead.
+Browser E2E is a real production Playwright audit. It runs against the built
+Next.js server and covers the 1440px desktop, 430px mobile, and 390px mobile
+layouts, with screenshots and traces uploaded by CI.
 
 ## Security properties
 
@@ -427,6 +429,7 @@ Run the deterministic release checks from the repository root:
 ```powershell
 $env:GENVM_VERSION='v0.2.16'
 pnpm test
+node scripts/run-node-qualification.mjs
 pnpm contracts:compile
 pnpm contracts:lint
 pnpm --dir frontend test
@@ -437,6 +440,8 @@ pnpm network:guard
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/secret-scan.ps1
 node tools/qualification/validate-manifest.mjs
 python scripts/validate-deployment-manifest.py
+python scripts/validate-qualification-v2.py
+python scripts/validate-qualification-v7.py
 ```
 
 These checks do not submit chain transactions. Hosted qualification is a
@@ -506,8 +511,9 @@ passwords, seed phrases, or API tokens in `.env.example` or tracked files.
   designed to fail closed in those cases.
 - Validator consensus is bounded by the locked schema and evidence supplied;
   it is not a general-purpose oracle.
-- Browser E2E was unavailable in the release environment; HTTP route smoke and
-  canonical read smoke were used instead.
+- Browser E2E is enforced in CI at 1440px desktop, 430px mobile, and 390px
+  mobile widths; HTTP route smoke and canonical read smoke remain additional
+  checks.
 
 ## Current status
 

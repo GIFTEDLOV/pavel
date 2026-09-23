@@ -16,7 +16,7 @@ Evidence definitions are append-only and bind kind, original HTTPS URL, authorit
 
 ## Authorization
 
-Authorization asks whether the frozen Intent complies with the frozen Mandate. V6 consensus contains only the `pavel-authorization-v2` schema and twelve JSON booleans. Deterministic Core code derives `AUTHORIZED` only when every field is true; otherwise it stores `REJECTED`, `AUTHORIZATION_CHECKS_FAILED`, and the ordered `failed_checks` field names. No LLM-generated prose is required for canonical correctness. Deterministic code checks caller, expiry, amount, recipient, Mandate status, registered identity, source authority, and evidence readiness. Authorization is separate from payment reservation.
+Authorization asks whether the frozen Intent complies with the frozen Mandate. The deployed V7 lifecycle uses the `pavel-authorization-v2` schema with twelve JSON booleans; the schema name is historical V2 nomenclature, not a V6 deployment claim. Deterministic Core code derives `AUTHORIZED` only when every field is true; otherwise it stores `REJECTED`, `AUTHORIZATION_CHECKS_FAILED`, and the ordered `failed_checks` field names. No LLM-generated prose is required for canonical correctness. Deterministic code checks caller, expiry, amount, recipient, Mandate status, registered identity, source authority, and evidence readiness. Authorization is separate from payment reservation.
 
 ## Reservation
 

@@ -532,7 +532,7 @@ async function main() {
         if (BigInt(state.deposited ?? "0") !== BigInt(beforeAccounting.deposited ?? "0")) throw new Error("Deposit precondition changed");
       }, async () => read(client, VAULT, "get_accounting", [mandateId]), 1n);
       const afterDeposit = assertAccounting(depositResult.readback, "Post-deposit mandate");
-      if (BigInt(afterDeposit.deposited) !== BigInt(beforeAccounting.deposited) + 1n || BigInt(afterDeposit.available) !== BigInt(beforeAccounting.available) + 1n) throw new Error("Deposit accounting delta is not exactly one GEN unit");
+      if (BigInt(afterDeposit.deposited) !== BigInt(beforeAccounting.deposited) + 1n || BigInt(afterDeposit.available) !== BigInt(beforeAccounting.available) + 1n) throw new Error("Deposit accounting delta is not exactly one smallest native GEN unit (0.000000000000000001 GEN)");
     }
 
     let intentId = "I-1";

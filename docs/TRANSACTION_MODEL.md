@@ -4,11 +4,15 @@ PAVEL writes follow:
 
 `PRECONDITION READ → NETWORK CHECK → FEE HANDLING → BROADCAST ONCE → RECEIVE TRANSACTION ID → PERSIST ID → TRACK SAME ID → WAIT FINALIZATION → VERIFY EXECUTION SUCCESS → AUTHORITATIVE READBACK`
 
-The frontend uses stable `genlayer-js` `1.1.8`, persists the ID returned by `writeContract`, and reads the same ID with `getTransaction`. In this installed stable SDK, the receipt exposes separate `statusName`, `resultName`, and `txExecutionResultName` fields; PAVEL's local success predicate requires `FINALIZED`, `SUCCESS`, and `FINISHED_WITH_RETURN`. `FINALIZED` and successful execution are separate conditions. Polling failure is `AMBIGUOUS`, not submission failure, and never authorizes a second broadcast.
+The frontend uses stable `genlayer-js` `1.1.8`, persists the ID returned by `writeContract`, and finalizes that same ID with the SDK's official `waitForTransactionReceipt({ status: "FINALIZED", fullTransaction: true })` helper. The receipt exposes separate `statusName`, `resultName`, and `txExecutionResultName` fields; durable UI success requires `statusName === "FINALIZED"` and `txExecutionResultName === "FINISHED_WITH_RETURN"`. Consensus `resultName` values such as `MAJORITY_AGREE` or `MAJORITY_DISAGREE` are not execution-success predicates. `FINALIZED` and successful execution are separate conditions. Polling timeout or network loss is `AMBIGUOUS`, not submission failure, and never authorizes a second broadcast.
 
 The active V7 frontend uses this transaction model for the verified Studionet
-application. Fee estimation remains an SDK/tooling concern; a finalized parent
-transaction is never treated as proof that an external recipient was credited.
+application. The same-hash coordinator uses the stable SDK helper with bounded
+retries and keeps the transaction persisted for resume after an ambiguous
+timeout. Fee estimation remains an SDK/wallet concern; application value,
+protocol fee, and total wallet requirement are displayed separately. A
+finalized parent transaction is never treated as proof that an external
+recipient was credited.
 
 ## HISTORICAL — Empty-string argument transport
 

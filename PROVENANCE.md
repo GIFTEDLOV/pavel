@@ -10,25 +10,39 @@ Secondary engineering references were inspected locally without copying product 
 
 PAVEL is a distinct protocol. No live deployment addresses, transaction hashes, faucet state, or consensus proof are imported from those repositories.
 
-## Current release
+## Deployed V7 contract source
+
+This identity is frozen and is not changed by the documentation or frontend
+cleanup in this pass.
 
 | Field | Verified value |
 | --- | --- |
-| Version | V7 |
-| Source baseline commit | `8e59a99b1b7a83f28716549694df2f6d45ec025e` (contract/frontend source unchanged by this pass) |
 | Network | Studionet (`61999`) |
 | Core | `0xBA2356FfE5062506FA938da4715c03a2BE7929bF` |
 | Vault | `0x552167Cc0883D02ce42fA2aD64E29Cd10EE3eDFD` |
 | Core SHA-256 | `4acc04c4b684b35058b793973eec75569af9e981eb84d33167198615255b785a` |
 | Vault SHA-256 | `f671005e07a658a17a7711807d23fa56bf0d6e2e85d0a266eafc17b03455f15c` |
-| Repository | <https://github.com/GIFTEDLOV/pavel> |
-| Application | <https://pavel-nine.vercel.app> |
-| Canonical state | `FULFILLED / RELEASE_PENDING` |
+| Authorization schema | `pavel-authorization-v2` |
+| Fulfillment schema | `pavel-fulfillment-v2` |
+| Canonical qualification state | `FULFILLED / RELEASE_PENDING` |
 | External settlement | `UNCONFIRMED` |
 
-The final Git commit for this documentation pass is reported with the release
-audit; the source baseline above remains unchanged. The V7 deployment is the
-active source-verified release.
+## Current repository release
+
+The repository release is the final Git commit after this cleanup, not the
+historical source baseline below. The exact `FINAL_HEAD` is recorded after the
+release commit and tag are created.
+
+| Field | Verified value |
+| --- | --- |
+| Repository | <https://github.com/GIFTEDLOV/pavel> |
+| Production alias | <https://pavel-nine.vercel.app> |
+| Frontend release | Current `frontend/` source at final repository HEAD |
+| External settlement | `UNCONFIRMED` |
+
+The historical source baseline commit `8e59a99b1b7a83f28716549694df2f6d45ec025e`
+is retained only as audit history; it is not presented as the current frontend
+release or repository HEAD.
 
 ## HISTORICAL — Local source and qualification history
 

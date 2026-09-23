@@ -116,7 +116,7 @@ async function main() {
   await write("core:seal_mandate", core, "seal_mandate", ["M-1"]);
   await setTime("2030-01-01T00:30:01Z");
   await write("vault:deposit", vault, "deposit", ["M-1"], AMOUNT);
-  await write("core:create_intent", core, "create_intent", ["M-1", "C-1", addressBytes(CalldataAddress, account.address), AMOUNT, "Exact GenLayer artifact delivery", `Retrieve and deliver the exact artifact ${EVIDENCE_URL} with SHA-256 ${evidenceSha} and byte length ${evidenceBytes.byteLength}.`, `The complete authenticated artifact ${EVIDENCE_URL} identified by its committed digest and byte length.`, "Exactly one GEN; no substitution or commercial expansion.", "Complete authenticated artifact evidence must prove exact delivery.", BigInt(BASE_SECONDS + 3600)]);
+  await write("core:create_intent", core, "create_intent", ["M-1", "C-1", addressBytes(CalldataAddress, account.address), AMOUNT, "Exact GenLayer artifact delivery", `Retrieve and deliver the exact artifact ${EVIDENCE_URL} with SHA-256 ${evidenceSha} and byte length ${evidenceBytes.byteLength}.`, `The complete authenticated artifact ${EVIDENCE_URL} identified by its committed digest and byte length.`, "Exactly 1 smallest native GEN unit (0.000000000000000001 GEN); no substitution or commercial expansion.", "Complete authenticated artifact evidence must prove exact delivery.", BigInt(BASE_SECONDS + 3600)]);
   await write("core:submit_intent", core, "submit_intent", ["I-1"]);
   await write("core:define_evidence:authorization", core, "define_evidence", ["I-1", "PRODUCT_SERVICE", EVIDENCE_URL, EVIDENCE_AUTHORITY, evidenceSha, BigInt(evidenceBytes.byteLength), EVIDENCE_AUTHORITY, 0n]);
   await write("core:stage_evidence:authorization", core, "stage_evidence", ["I-1"]);

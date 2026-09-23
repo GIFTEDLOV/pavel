@@ -167,7 +167,7 @@ export function PavelProvider({ children }: { children: ReactNode }) {
       if (!current || current.hash !== hash) return current;
       if (result === "FINALIZED") return { ...current, stage: "FINALIZED_SUCCESS" };
       if (result === "EXECUTION_FAILED") return { ...current, stage: "EXECUTION_FAILED", error: "The transaction finalized with an execution error. No canonical success is assumed." };
-      if (result === "AMBIGUOUS") return { ...current, stage: "AMBIGUOUS", error: "Polling was inconclusive. The same transaction ID remains authoritative." };
+      if (result === "AMBIGUOUS") return { ...current, stage: "AMBIGUOUS", error: "TRACKING DELAYED: polling was inconclusive. The same transaction ID remains authoritative; resume reconciliation instead of resubmitting." };
       return { ...current, stage: "FINALIZING" };
     });
     if (result === "FINALIZED") {

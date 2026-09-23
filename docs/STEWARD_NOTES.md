@@ -18,6 +18,8 @@ PAVEL addresses the recurring review failures explicitly:
 - Direct, adversarial, property, address-calldata, frontend status, and
   transaction persistence tests map these claims to code.
 
-The remaining live qualification dependency is secure operator signing for the
-minimal lifecycle. The corrected pair is deployed, source-verified, and
-bidirectionally bound; this signing boundary is intentionally not bypassed.
+The hosted V7 qualification is completed. The corrected Core/Vault pair is
+deployed, source-verified, and bidirectionally bound. A wallet remains
+required for new user-authorized writes, but it is not an outstanding
+qualification dependency or a reason to describe the current release as
+incomplete.

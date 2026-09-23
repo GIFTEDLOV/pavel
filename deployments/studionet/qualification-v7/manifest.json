@@ -1,0 +1,19 @@
+{
+  "packageVersion": "qualification-v7",
+  "network": "studionet",
+  "chainId": 61999,
+  "rpc": "https://studio.genlayer.com/api",
+  "core": {
+    "address": "0xBA2356FfE5062506FA938da4715c03a2BE7929bF",
+    "sourceSha256": "4acc04c4b684b35058b793973eec75569af9e981eb84d33167198615255b785a"
+  },
+  "vault": {
+    "address": "0x552167Cc0883D02ce42fA2aD64E29Cd10EE3eDFD",
+    "sourceSha256": "f671005e07a658a17a7711807d23fa56bf0d6e2e85d0a266eafc17b03455f15c"
+  },
+  "authorizationSchema": "pavel-authorization-v2",
+  "fulfillmentSchema": "pavel-fulfillment-v2",
+  "canonicalQualificationState": "FULFILLED_RELEASE_PENDING_EXTERNAL_UNCONFIRMED",
+  "externalSettlementStatus": "UNCONFIRMED",
+  "lifecycleTransactionHashes": []
+}

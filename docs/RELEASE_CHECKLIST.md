@@ -9,10 +9,11 @@ runtime configuration.
 - [x] Frozen commit and clean tracked worktree.
 - [x] Core and Vault source hashes recorded and reviewed.
 - [x] Python compile, Direct Mode, adversarial, property, and state-machine tests pass serially.
+- [x] Full reusable Node qualification suite passes (`111 passed`).
 - [x] GenVM lint, validation, schema, typecheck, and Core/Vault interface parity pass.
 - [x] Frontend tests, typecheck, lint, and production build pass.
 - [x] Browser E2E — production Playwright audit passes at 1440px desktop, 430px mobile, and 390px mobile widths.
-- [x] Network guard, manifest validation, source hash gate, and secret scan pass.
+- [x] Network guard, deployment manifest validation, historical qualification-v2 validation, current V7 qualification validation, source hash gate, and secret scan pass.
 - [x] V7 Core and Vault finalize with successful execution.
 - [x] Exact deployed-source parity is established for both contracts.
 - [x] One-time binding is verified bidirectionally.
