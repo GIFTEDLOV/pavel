@@ -62,6 +62,23 @@ is required by the release runner.
 PAVEL targets stable Studionet: `https://studio.genlayer.com/api`, chain
 `61999`, native `GEN`, explorer `https://explorer-studio.genlayer.com`.
 
+## Verified V7 deployment
+
+- Core: `0xBA2356FfE5062506FA938da4715c03a2BE7929bF`
+- Vault: `0x552167Cc0883D02ce42fA2aD64E29Cd10EE3eDFD`
+- Authorization schema: `pavel-authorization-v2`
+- Fulfillment schema: `pavel-fulfillment-v2`
+
+Authorization combines deterministic mandate, intent, evidence, authority, and
+budget constraints with validator consensus over the semantic authorization
+vector. Fulfillment uses deterministic objective checks plus the two-field
+semantic vector `material_terms_satisfied` and
+`completion_evidence_sufficient`. Authenticated evidence is complete and
+bounded at 4096 bytes; it is never silently truncated. Settlement directions
+are issued by Core and enforced by Vault, with timeout/refund recovery and
+replay protection. Every qualification transaction is reconciled by terminal
+protocol status, execution result, and canonical application readback.
+
 ## Architecture
 
 ```mermaid
