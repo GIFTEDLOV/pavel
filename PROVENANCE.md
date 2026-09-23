@@ -29,17 +29,33 @@ cleanup in this pass.
 
 ## Current repository release
 
-The repository release is the final Git commit after this cleanup, not the
-historical source baseline below. The commit containing this provenance record
-is the release source commit; its exact SHA is reported as `FINAL_HEAD` in the
-release audit and anchored by the `v7.0.0` tag.
+The repository release is the final Git commit after this V7.0.1 hardening
+pass, not the historical source baseline below. The source and proof commit
+that was verified before this provenance metadata update is recorded
+explicitly below.
+
+| Provenance field | Verified value |
+| --- | --- |
+| `REPOSITORY_RELEASE_HEAD` | `b45dd5e4c57f94b2eabd615c5371f2966a853eff` |
+| `PRODUCTION_BUILD_HEAD` | `b45dd5e4c57f94b2eabd615c5371f2966a853eff` |
+| `PRODUCTION_DEPLOYMENT_ID` | `dpl_9MMMKLk79L47wsVnUpgCcihSEXap` |
+| Production deployment state | `READY` / production |
+
+The deployment above was queried from Vercel's deployment API and its
+`githubCommitSha` matched `PRODUCTION_BUILD_HEAD` exactly. This metadata
+commit is documentation-only. Because the Vercel Git integration can create a
+new production deployment for this provenance commit, the final deployment
+whose `githubCommitSha` equals the final repository `HEAD` is the
+release-authoritative record and is recorded in the PAVEL V7.0.1 GitHub
+Release metadata. The provenance process deliberately stops there rather than
+creating a recursive deployment/documentation loop.
 
 | Field | Verified value |
 | --- | --- |
 | Repository | <https://github.com/GIFTEDLOV/pavel> |
-| Release tag | `v7.0.0` (final repository HEAD) |
+| Release tag | `v7.0.1` (final repository HEAD) |
 | Production alias | <https://pavel-nine.vercel.app> |
-| Vercel deployment | `dpl_5Jdc6aZCA3NyWmju4YpYF4zTDAb8` (READY; production) |
+| Vercel deployment | See `PRODUCTION_DEPLOYMENT_ID` above and the final V7.0.1 GitHub Release record |
 | Frontend release | Current `frontend/` source deployed by the Vercel deployment above |
 | External settlement | `UNCONFIRMED` |
 
