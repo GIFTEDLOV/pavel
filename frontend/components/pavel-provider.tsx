@@ -11,7 +11,7 @@ declare global { interface Window { ethereum?: ProviderEvent } }
 
 type WalletStatus = "DISCONNECTED" | "CONNECTING" | "CONNECTED" | "WRONG_NETWORK" | "ERROR";
 type ProviderEvent = WalletProvider & { on?: (event: string, handler: (...args: unknown[]) => void) => void; removeListener?: (event: string, handler: (...args: unknown[]) => void) => void };
-type TxStage = "REVIEW" | "AWAITING_SIGNATURE" | "TX_ID_RECEIVED" | "FINALIZING" | "FINALIZED_SUCCESS" | "EXECUTION_FAILED" | "AMBIGUOUS";
+type TxStage = "REVIEW" | "AWAITING_SIGNATURE" | "TX_ID_RECEIVED" | "FINALIZING" | "FINALIZED_SUCCESS" | "CANONICAL_VERIFIED" | "EXECUTION_FAILED" | "AMBIGUOUS";
 
 export interface WriteRequest {
   actionKey: string;
@@ -29,6 +29,26 @@ export interface ActiveTransaction extends WriteRequest {
   error?: string;
 }
 
+function verifyCanonicalPostcondition(request: WriteRequest, snapshot: ProtocolSnapshot): boolean {
+  const id = String(request.args[0] ?? "");
+  const intent = snapshot.intents.find((item) => item.intent_id === id);
+  const mandate = snapshot.mandates.find((item) => item.mandate_id === id);
+  switch (request.method) {
+    case "authorize_intent": return Boolean(snapshot.authorizations[id]?.authorization_decision === "AUTHORIZED" || intent?.status === "REJECTED");
+    case "reserve": return snapshot.reservations[id]?.status === "RESERVED";
+    case "request_release": return snapshot.reservations[id]?.status === "RELEASE_PENDING" && snapshot.settlements[id]?.direction === "RELEASE_TO_COUNTERPARTY";
+    case "request_refund": return snapshot.reservations[id]?.status === "REFUND_PENDING" && snapshot.settlements[id]?.direction === "REFUND_TO_PRINCIPAL";
+    case "submit_intent": return intent?.status === "SUBMITTED";
+    case "stage_evidence": return intent?.status === "EVIDENCE_READY" || intent?.status === "FULFILLMENT_PENDING";
+    case "start_fulfillment": return intent?.status === "FULFILLMENT_PENDING";
+    case "assess_fulfillment": return ["FULFILLED", "NOT_FULFILLED", "FULFILLMENT_RETRY_REQUIRED"].includes(intent?.status ?? "");
+    case "seal_mandate": return mandate?.status === "SEALED";
+    case "configure_mandate": return Boolean(mandate && mandate.status === "DRAFT");
+    case "deposit": return Boolean(snapshot.accounting[id] && BigInt(snapshot.accounting[id]?.deposited ?? "0") > 0n);
+    default: return false;
+  }
+}
+
 interface PavelContextValue {
   wallet: { status: WalletStatus; address?: Address; chainId?: number; error?: string };
   connectWallet: () => Promise<void>;
@@ -37,9 +57,9 @@ interface PavelContextValue {
   snapshot?: ProtocolSnapshot;
   snapshotLoading: boolean;
   snapshotError?: string;
-  refreshSnapshot: (options?: { intentId?: string; mandateId?: string }) => Promise<void>;
+  refreshSnapshot: (options?: { intentId?: string; mandateId?: string }) => Promise<ProtocolSnapshot | undefined>;
   submitWrite: (request: WriteRequest) => Promise<TrackedWrite | undefined>;
-  trackTransaction: (hash: string) => Promise<void>;
+  trackTransaction: (hash: string, request?: WriteRequest) => Promise<void>;
   activeTransaction?: ActiveTransaction;
   dismissTransaction: () => void;
 }
@@ -68,9 +88,12 @@ export function PavelProvider({ children }: { children: ReactNode }) {
     setSnapshotLoading(true);
     setSnapshotError(undefined);
     try {
-      setSnapshot(await readProtocolSnapshot(options));
+      const next = await readProtocolSnapshot(options);
+      setSnapshot(next);
+      return next;
     } catch (cause) {
       setSnapshotError(cause instanceof Error ? cause.message : "Studionet read unavailable");
+      return undefined;
     } finally {
       setSnapshotLoading(false);
     }
@@ -137,7 +160,7 @@ export function PavelProvider({ children }: { children: ReactNode }) {
 
   const disconnectWallet = useCallback(() => setWallet({ status: "DISCONNECTED" }), []);
 
-  const trackTransaction = useCallback(async (hash: string) => {
+  const trackTransaction = useCallback(async (hash: string, request?: WriteRequest) => {
     setActiveTransaction((current) => current ? { ...current, stage: "FINALIZING" } : current);
     const result = await reconcileTransaction(hash);
     setActiveTransaction((current) => {
@@ -147,7 +170,11 @@ export function PavelProvider({ children }: { children: ReactNode }) {
       if (result === "AMBIGUOUS") return { ...current, stage: "AMBIGUOUS", error: "Polling was inconclusive. The same transaction ID remains authoritative." };
       return { ...current, stage: "FINALIZING" };
     });
-    if (result === "FINALIZED") await refreshSnapshot();
+    if (result === "FINALIZED") {
+      const refreshed = await refreshSnapshot({ intentId: request?.method === "reserve" || request?.method === "authorize_intent" || request?.method === "submit_intent" || request?.method === "stage_evidence" || request?.method === "assess_fulfillment" || request?.method === "start_fulfillment" ? String(request.args[0] ?? "") : undefined, mandateId: request?.method === "deposit" ? String(request.args[0] ?? "") : undefined });
+      const verified = request && refreshed ? verifyCanonicalPostcondition(request, refreshed) : false;
+      setActiveTransaction((current) => current && current.hash === hash ? { ...current, stage: verified ? "CANONICAL_VERIFIED" : "FINALIZED_SUCCESS", error: verified ? undefined : "Execution finalized; latest-final state was refreshed, but this action has no automatic postcondition proof." } : current);
+    }
   }, [refreshSnapshot]);
 
   const submitWrite = useCallback(async (request: WriteRequest) => {
@@ -165,7 +192,7 @@ export function PavelProvider({ children }: { children: ReactNode }) {
       await switchToStudionet();
       const tracked = await writeOnce({ actionKey: request.actionKey, account: wallet.address, contract: request.contract, method: request.method, args: request.args, provider, write: { address: request.contract, functionName: request.method, args: [...request.args], value: request.value ?? 0n } });
       setActiveTransaction({ ...request, ...tracked, stage: "TX_ID_RECEIVED" });
-      void trackTransaction(tracked.hash);
+      void trackTransaction(tracked.hash, request);
       return tracked;
     } catch (cause) {
       setActiveTransaction({ ...request, stage: "EXECUTION_FAILED", error: cause instanceof Error ? cause.message : "Wallet write failed" });
