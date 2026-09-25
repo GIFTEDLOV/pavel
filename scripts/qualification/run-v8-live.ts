@@ -437,7 +437,9 @@ async function run() {
   saveState(state);
 
   const adjudicationPostcondition = async () => { const challenge = asRecord(await readLatest(client, core, "get_dispute", [challengeId], latestFinal)); const intent = asRecord(await readLatest(client, core, "get_intent", [intentId], latestFinal)); const settlement = asRecord(await readLatest(client, core, "get_settlement_instruction", [intentId], latestFinal)); if (!["RESOLVED", "ASSESSMENT_RETRY_REQUIRED"].includes(challenge.status)) throw new Error(`Unexpected adjudication state ${challenge.status}`); return {challenge, intent, settlement}; };
-  let adjudication;
+  let adjudication: AnyRecord | undefined;
+  let adjudicated: AnyRecord;
+  let adjudicationUnresolved = false;
   const firstAdjudication = state.steps["core:adjudicate_dispute"];
   if (firstAdjudication?.tx && firstAdjudication.status === "SUBMITTED") {
     const reconciled = await reconcileSameHash({client, hash: firstAdjudication.tx, interval: POLL_MS});
@@ -448,13 +450,43 @@ async function run() {
     state.observations.adjudicationRetry = {priorTx: firstAdjudication.tx, priorConsensus: txConsensus(reconciled.tx), reason: "MAJORITY_DISAGREE_WITHOUT_CANONICAL_STATE_COMMIT", unchangedChallengeStatus: currentChallenge.status, retryCount: 1};
     saveState(state);
   }
-  adjudication = await executeWrite({client, account, state, abi, label: firstAdjudication?.tx ? "core:adjudicate_dispute:retry-1" : "core:adjudicate_dispute", address: core, functionName: "adjudicate_dispute", args: [challengeId], postcondition: adjudicationPostcondition});
-  const adjudicated = adjudication.readback;
-  if (adjudicated.challenge.status !== "RESOLVED") throw new Error(`Adjudication requires explicit inspection/retry: ${JSON.stringify(adjudicated.challenge)}`);
-  if (!["RELEASE_TO_COUNTERPARTY", "REFUND_TO_PRINCIPAL"].includes(adjudicated.challenge.resolution)) throw new Error("Resolved challenge has no permitted resolution");
-  if (adjudicated.settlement.status === "CHALLENGE_BLOCKED" || adjudicated.settlement.oldest_open_challenge !== "") throw new Error("Resolved challenge still blocks settlement");
-  state.observations.adjudication = adjudicated;
-  saveState(state);
+  const retryAdjudication = state.steps["core:adjudicate_dispute:retry-1"];
+  if (retryAdjudication?.tx && retryAdjudication.status === "SUBMITTED") {
+    const reconciled = await reconcileSameHash({client, hash: retryAdjudication.tx, interval: POLL_MS});
+    requireSuccessfulExecution(reconciled.tx);
+    const currentChallenge = asRecord(await readLatest(client, core, "get_dispute", [challengeId], latestFinal));
+    if (currentChallenge.status !== "QUALIFYING" || txConsensus(reconciled.tx) !== "MAJORITY_DISAGREE") throw new Error(`Adjudication retry has no permitted expiry fallback: status=${currentChallenge.status} consensus=${txConsensus(reconciled.tx)}`);
+    state.steps["core:adjudicate_dispute:retry-1"] = {...retryAdjudication, status: "RECONCILED_NO_CANONICAL_COMMIT", terminal_status: txStatus(reconciled.tx), execution: txExecution(reconciled.tx), consensus_result: txConsensus(reconciled.tx), execution_success: true, canonical_postcondition_met: false, retry_permitted: false};
+    state.observations.adjudicationRetry = {...(state.observations.adjudicationRetry ?? {}), retryTx: retryAdjudication.tx, retryConsensus: txConsensus(reconciled.tx), retryCount: 1, retryBudgetExhausted: true};
+    saveState(state);
+    adjudicationUnresolved = true;
+  }
+  if (!adjudicationUnresolved) {
+    adjudication = await executeWrite({client, account, state, abi, label: firstAdjudication?.tx ? "core:adjudicate_dispute:retry-1" : "core:adjudicate_dispute", address: core, functionName: "adjudicate_dispute", args: [challengeId], postcondition: adjudicationPostcondition});
+    adjudicated = adjudication.readback;
+    if (adjudicated.challenge.status !== "RESOLVED") throw new Error(`Adjudication requires explicit inspection/retry: ${JSON.stringify(adjudicated.challenge)}`);
+    if (!["RELEASE_TO_COUNTERPARTY", "REFUND_TO_PRINCIPAL"].includes(adjudicated.challenge.resolution)) throw new Error("Resolved challenge has no permitted resolution");
+    if (adjudicated.settlement.status === "CHALLENGE_BLOCKED" || adjudicated.settlement.oldest_open_challenge !== "") throw new Error("Resolved challenge still blocks settlement");
+    state.observations.adjudication = adjudicated;
+    saveState(state);
+  } else {
+    adjudicated = {challenge: asRecord(await readLatest(client, core, "get_dispute", [challengeId], latestFinal)), intent: asRecord(await readLatest(client, core, "get_intent", [intentId], latestFinal)), settlement: asRecord(await readLatest(client, core, "get_settlement_instruction", [intentId], latestFinal))};
+    state.observations.adjudication = {...adjudicated, status: "UNRESOLVED_AFTER_CONTROLLED_RETRY", noFurtherAdjudicationWrites: true};
+    saveState(state);
+  }
+
+  let expiryReadback: AnyRecord | null = null;
+  if (adjudicationUnresolved) {
+    const graceTarget = Number(adjudicated.challenge.deadline) + 3600 + 1;
+    await waitForChainTime(client, graceTarget, "CHALLENGE_REVIEW_GRACE");
+    const expiry = await executeWrite({client, account, state, abi, label: "core:expire_challenge", address: core, functionName: "expire_challenge", args: [challengeId], precondition: async () => { const challenge = asRecord(await readLatest(client, core, "get_dispute", [challengeId], latestFinal)); if (challenge.status !== "QUALIFYING") throw new Error(`Expiry fallback requires the unresolved qualifying challenge: ${challenge.status}`); }, postcondition: async () => { const challenge = asRecord(await readLatest(client, core, "get_dispute", [challengeId], latestFinal)); const intent = asRecord(await readLatest(client, core, "get_intent", [intentId], latestFinal)); const settlement = asRecord(await readLatest(client, core, "get_settlement_instruction", [intentId], latestFinal)); if (challenge.status !== "EXPIRED" || settlement.status === "CHALLENGE_BLOCKED" || settlement.direction === "") throw new Error(`Challenge expiry did not remove the blocker: ${challenge.status}/${settlement.status}/${settlement.direction}`); return {challenge, intent, settlement}; }});
+    expiryReadback = expiry.readback;
+    state.observations.expiry = {liveProof: "PASS", tx: expiry.hash, ...expiryReadback};
+    saveState(state);
+  } else {
+    state.observations.expiry = {liveProof: "NOT_RUN_TIME_BOUND", reason: "The resolved challenge path did not require waiting through the 3600-second review grace."};
+    saveState(state);
+  }
 
   const finalInstruction = asRecord(await readLatest(client, core, "get_settlement_instruction", [intentId], latestFinal));
   if (finalInstruction.direction !== "RELEASE_TO_COUNTERPARTY") throw new Error(`Live qualification direction changed unexpectedly: ${finalInstruction.direction}`);
@@ -476,7 +508,6 @@ async function run() {
   const settlementRecord = finalReservation.settlement_id ? asRecord(await readLatest(client, vault, "get_settlement", [finalReservation.settlement_id], latestFinal)) : {};
   if (finalAccounting.conserved !== true || finalAccounting.reserved !== "0") throw new Error(`Final accounting invariant failed: ${JSON.stringify(finalAccounting)}`);
   state.observations.final = {intent: finalIntent, reservation: finalReservation, accounting: finalAccounting, settlement: settlementRecord, childTransactions, externalObservation: settlementRecord.external_observation ?? "UNCONFIRMED"};
-  state.observations.expiry = {liveProof: "NOT_RUN_TIME_BOUND", reason: "CHALLENGE_REVIEW_GRACE_SECONDS is 3600; expiry was not falsified by weakening protocol timing. Direct/state-machine and frontend expiry coverage remain required."};
   saveState(state);
 
   saveJson(path.join(PROOF_DIR, "deployment.json"), {
@@ -518,7 +549,8 @@ async function run() {
       {state: "QUALIFYING", tx: stagedChallenge.hash, canonical: stagedChallenge.readback.challenge},
       {state: "DISPUTED", canonical: stagedChallenge.readback.intent},
       {state: "CHALLENGE_BLOCKED", canonical: blockedSettlement},
-      {state: adjudicated.challenge.status, tx: adjudication.hash, canonical: adjudicated.challenge, settlement: adjudicated.settlement},
+      {state: adjudicationUnresolved ? "ADJUDICATION_NOT_COMMITTED_AFTER_CONTROLLED_RETRY" : adjudicated.challenge.status, tx: adjudication?.hash ?? state.steps["core:adjudicate_dispute:retry-1"]?.tx ?? state.steps["core:adjudicate_dispute"]?.tx, canonical: adjudicated.challenge, settlement: adjudicated.settlement},
+      ...(expiryReadback ? [{state: "EXPIRED", tx: state.steps["core:expire_challenge"]?.tx, canonical: expiryReadback.challenge, settlement: expiryReadback.settlement}] : []),
     ],
     submittedDoesNotBlock: submittedSettlement.status !== "CHALLENGE_BLOCKED" && submittedSettlement.direction !== "",
     settlementBlockedProof: blockedSettlement.status === "CHALLENGE_BLOCKED" && blockedSettlement.direction === "" && blockedSettlement.oldest_open_challenge === challengeId,
