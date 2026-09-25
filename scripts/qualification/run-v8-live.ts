@@ -475,6 +475,9 @@ async function run() {
     saveState(state);
     adjudicationUnresolved = true;
   }
+  if (!adjudicationUnresolved && state.observations.adjudicationRetry?.retryBudgetExhausted === true) {
+    adjudicationUnresolved = true;
+  }
   if (!adjudicationUnresolved) {
     adjudication = await executeWrite({client, account, state, abi, label: firstAdjudication?.tx ? "core:adjudicate_dispute:retry-1" : "core:adjudicate_dispute", address: core, functionName: "adjudicate_dispute", args: [challengeId], postcondition: adjudicationPostcondition});
     adjudicated = adjudication.readback;
