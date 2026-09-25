@@ -434,7 +434,19 @@ async function run() {
   state.observations.challengeBlockingProof = {submitted: submittedSettlement, qualifying: stagedChallenge.readback, settlement: blockedSettlement};
   saveState(state);
 
-  const adjudication = await executeWrite({client, account, state, abi, label: "core:adjudicate_dispute", address: core, functionName: "adjudicate_dispute", args: [challengeId], postcondition: async () => { const challenge = asRecord(await readLatest(client, core, "get_dispute", [challengeId], latestFinal)); const intent = asRecord(await readLatest(client, core, "get_intent", [intentId], latestFinal)); const settlement = asRecord(await readLatest(client, core, "get_settlement_instruction", [intentId], latestFinal)); if (!["RESOLVED", "ASSESSMENT_RETRY_REQUIRED"].includes(challenge.status)) throw new Error(`Unexpected adjudication state ${challenge.status}`); return {challenge, intent, settlement}; }});
+  const adjudicationPostcondition = async () => { const challenge = asRecord(await readLatest(client, core, "get_dispute", [challengeId], latestFinal)); const intent = asRecord(await readLatest(client, core, "get_intent", [intentId], latestFinal)); const settlement = asRecord(await readLatest(client, core, "get_settlement_instruction", [intentId], latestFinal)); if (!["RESOLVED", "ASSESSMENT_RETRY_REQUIRED"].includes(challenge.status)) throw new Error(`Unexpected adjudication state ${challenge.status}`); return {challenge, intent, settlement}; };
+  let adjudication;
+  const firstAdjudication = state.steps["core:adjudicate_dispute"];
+  if (firstAdjudication?.tx && firstAdjudication.status === "SUBMITTED") {
+    const reconciled = await reconcileSameHash({client, hash: firstAdjudication.tx, interval: POLL_MS});
+    requireSuccessfulExecution(reconciled.tx);
+    const currentChallenge = asRecord(await readLatest(client, core, "get_dispute", [challengeId], latestFinal));
+    if (currentChallenge.status !== "QUALIFYING" || txConsensus(reconciled.tx) !== "MAJORITY_DISAGREE") throw new Error(`Existing adjudication hash has no permitted controlled retry state: status=${currentChallenge.status} consensus=${txConsensus(reconciled.tx)}`);
+    state.steps["core:adjudicate_dispute"] = {...firstAdjudication, status: "RECONCILED_NO_CANONICAL_COMMIT", terminal_status: txStatus(reconciled.tx), execution: txExecution(reconciled.tx), consensus_result: txConsensus(reconciled.tx), execution_success: true, canonical_postcondition_met: false, retry_permitted: true};
+    state.observations.adjudicationRetry = {priorTx: firstAdjudication.tx, priorConsensus: txConsensus(reconciled.tx), reason: "MAJORITY_DISAGREE_WITHOUT_CANONICAL_STATE_COMMIT", unchangedChallengeStatus: currentChallenge.status, retryCount: 1};
+    saveState(state);
+  }
+  adjudication = await executeWrite({client, account, state, abi, label: firstAdjudication?.tx ? "core:adjudicate_dispute:retry-1" : "core:adjudicate_dispute", address: core, functionName: "adjudicate_dispute", args: [challengeId], postcondition: adjudicationPostcondition});
   const adjudicated = adjudication.readback;
   if (adjudicated.challenge.status !== "RESOLVED") throw new Error(`Adjudication requires explicit inspection/retry: ${JSON.stringify(adjudicated.challenge)}`);
   if (!["RELEASE_TO_COUNTERPARTY", "REFUND_TO_PRINCIPAL"].includes(adjudicated.challenge.resolution)) throw new Error("Resolved challenge has no permitted resolution");
