@@ -373,7 +373,9 @@ async function run() {
   const intentId = "I-1";
   await executeWrite({client, account, state, abi, label: "core:register_principal", address: core, functionName: "register_principal", args: [], postcondition: async () => ({mandateCount: String(await readLatest(client, core, "get_mandate_count", [], latestFinal))})});
   await executeWrite({client, account, state, abi, label: "core:register_agent", address: core, functionName: "register_agent", args: [calldataAddress(CalldataAddress, EXPECTED_SIGNER), "PAVEL V8 qualification agent"], postcondition: async () => ({agentRegistration: "committed", mandateCount: String(await readLatest(client, core, "get_mandate_count", [], latestFinal))})});
-  await executeWrite({client, account, state, abi, label: "core:register_counterparty", address: core, functionName: "register_counterparty", args: [calldataAddress(CalldataAddress, EXPECTED_SIGNER), "PAVEL V8 raw GitHub evidence authority", AUTHORITY], postcondition: async () => asRecord(await readLatest(client, core, "get_counterparty", [counterpartyId], latestFinal))});
+  state.observations.failedInputAttempt = {label: "core:register_counterparty", tx: state.steps["core:register_counterparty"]?.tx ?? "", execution: state.steps["core:register_counterparty"]?.execution ?? "FINISHED_WITH_ERROR", stateMutation: "NONE", reason: "Runner preflight passed a bare host where the contract requires an HTTPS authority URL; corrected without replaying the failed hash."};
+  saveState(state);
+  await executeWrite({client, account, state, abi, label: "core:register_counterparty:corrected", address: core, functionName: "register_counterparty", args: [calldataAddress(CalldataAddress, EXPECTED_SIGNER), "PAVEL V8 raw GitHub evidence authority", AUTH_URL], postcondition: async () => asRecord(await readLatest(client, core, "get_counterparty", [counterpartyId], latestFinal))});
   const beforeMandate = await chainTime(client);
   const validFrom = beforeMandate.chainNow + MANDATE_ACTIVATION_MARGIN;
   const expiresAt = validFrom + MANDATE_HORIZON;
