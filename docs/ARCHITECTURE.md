@@ -15,10 +15,11 @@ canonical state, and verifies each write by a `LATEST_FINAL` postcondition.
 Only a qualifying challenge blocks settlement. A submitted challenge is
 visible but does not create a local settlement veto.
 
-V7 binding is one-shot in both directions. Core source hash
+V8 binding is one-shot in both directions. Core source hash
 `1636cc81461b5536103add686586308a05f599740a4e625e00825d8d11401e60` therefore
-requires a fresh Core; the deployed V7 Vault remains bound to the historical
-Core and is not reusable. The corrected pair is not deployed.
+required a fresh Core and Vault. The active V8 pair is source-parity verified
+and its qualification proof is under `deployments/studionet/qualification-v8/`.
+The V7 pair remains historical and is not runtime configuration.
 
 ## PavelCore
 

@@ -4,27 +4,31 @@ Qualification must run Python compile checks, Direct Mode, property/invariant te
 
 Studio/Studionet qualification is a separate explicit stage. It must use stable Studionet chain `61999` and the exact source manifest produced by the final local commit. It must not be inferred from Direct Mode or from an accepted-but-unsuccessful transaction.
 
-## CURRENT ACTIVE QUALIFICATION: V7
+## CURRENT ACTIVE QUALIFICATION: V8
 
 | Field | Current verified value |
 | --- | --- |
 | Network | Studionet (`61999`) |
-| Core | `0xBA2356FfE5062506FA938da4715c03a2BE7929bF` |
-| Vault | `0x552167Cc0883D02ce42fA2aD64E29Cd10EE3eDFD` |
-| Core SHA-256 | `4acc04c4b684b35058b793973eec75569af9e981eb84d33167198615255b785a` |
+| Core | `0x1540cEa5d3Df622068B2d3A22aac8Bcb31B900f4` |
+| Vault | `0xac43A164AB9e82d7Af387059c04579FE48050fce` |
+| Core SHA-256 | `1636cc81461b5536103add686586308a05f599740a4e625e00825d8d11401e60` |
 | Vault SHA-256 | `f671005e07a658a17a7711807d23fa56bf0d6e2e85d0a266eafc17b03455f15c` |
 | Authorization | `pavel-authorization-v2`, canonical `AUTHORIZED` |
 | Fulfillment | `pavel-fulfillment-v2`, canonical `FULFILLED` |
 | Settlement | `RELEASE_PENDING` |
 | Accounting | Conserved |
 | External settlement | `UNCONFIRMED` |
+| Challenge proof | `QUALIFYING` -> `CHALLENGE_BLOCKED` -> `EXPIRED` |
+| Fulfillment gate | Sequence-one authenticated before assessment |
 | Application | <https://pavel-nine.vercel.app> |
 | Repository | <https://github.com/GIFTEDLOV/pavel> |
 
-The V7 hosted lifecycle passed source parity, bidirectional binding,
+The V8 hosted lifecycle passed source parity, bidirectional binding,
 authorization, reservation, complete fulfillment evidence, deterministic
-fulfillment checks, semantic fulfillment, and Core-directed settlement
-readback. `RELEASE_PENDING` is not described as external payment completion.
+fulfillment checks, semantic fulfillment, challenge qualification/blocking,
+contract-enforced expiry, and Core-directed settlement readback.
+`RELEASE_PENDING` is not described as external payment completion. The full
+sanitized proof is under `deployments/studionet/qualification-v8/`.
 
 The sections below are the **HISTORICAL QUALIFICATION RECORD** for V1–V6.
 They preserve failed transactions, source findings, and migration boundaries;

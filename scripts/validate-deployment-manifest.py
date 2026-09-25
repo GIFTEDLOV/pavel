@@ -1,4 +1,4 @@
-"""Validate the active PAVEL V7 deployment manifest."""
+"""Validate the active PAVEL V8 deployment manifest."""
 
 from __future__ import annotations
 
@@ -19,20 +19,45 @@ def main() -> int:
         "currency": "GEN",
         "explorer": "https://explorer-studio.genlayer.com",
         "deployed": True,
-        "version": "V7",
-        "coreAddress": "0xBA2356FfE5062506FA938da4715c03a2BE7929bF",
-        "vaultAddress": "0x552167Cc0883D02ce42fA2aD64E29Cd10EE3eDFD",
+        "version": "V8",
+        "coreAddress": "0x1540cEa5d3Df622068B2d3A22aac8Bcb31B900f4",
+        "vaultAddress": "0xac43A164AB9e82d7Af387059c04579FE48050fce",
         "sourceHashes": {
-            "core": "4acc04c4b684b35058b793973eec75569af9e981eb84d33167198615255b785a",
+            "core": "1636cc81461b5536103add686586308a05f599740a4e625e00825d8d11401e60",
             "vault": "f671005e07a658a17a7711807d23fa56bf0d6e2e85d0a266eafc17b03455f15c",
         },
         "authorizationSchema": "pavel-authorization-v2",
         "fulfillmentSchema": "pavel-fulfillment-v2",
         "qualificationState": "FULFILLED_RELEASE_PENDING_EXTERNAL_UNCONFIRMED",
+        "challengeFlowVerification": {
+            "intentId": "I-1",
+            "challengeId": "D-1",
+            "submittedDoesNotBlock": True,
+            "qualifyingChallengeBlocksSettlement": True,
+            "settlementStatus": "CHALLENGE_BLOCKED",
+            "settlementDirectionWhileBlocked": "",
+            "expiryProof": "PASS",
+            "proofPackage": "deployments/studionet/qualification-v8/challenge-flow.json",
+        },
+        "fulfillmentGateVerification": {
+            "sequenceOneAuthenticatedBeforeAssessment": True,
+            "prematureAssessmentLiveTransactionSent": False,
+            "directModeGuard": "PASS",
+            "proofPackage": "deployments/studionet/qualification-v8/fulfillment-gate.json",
+        },
+        "externalSettlementObservation": "UNCONFIRMED",
+        "sourceFixCommit": "6819759400b3685d94c4a700433ba685f639a3dd",
+        "deploymentTransactions": {
+            "coreDeploy": "0x115844714da2bc2fad78586f2498b4fcfd7ca25c288c36ce2caf5f7e7fcc3c10",
+            "vaultDeploy": "0xca6cde76b92365f5c061624376ce7922022d1847f60406773d2011fa5fe1f354",
+            "vaultBindCore": "0x82c1706eed8f37561ef19d98d105bbecd0a625ffbd08e2a01b4a43f244dda50a",
+            "coreSetVaultAddress": "0x756e43e7e43b5d8e54716c6e44c311488f3f8f677c47fbd8526df40cfadaf105",
+        },
+        "proofPackage": "deployments/studionet/qualification-v8",
     }
     if data != required:
-        raise SystemExit(f"deployment manifest does not match verified PAVEL V7: {data!r}")
-    print("DEPLOYMENT_MANIFEST: passed (verified PAVEL V7 Studionet deployment)")
+        raise SystemExit(f"deployment manifest does not match verified PAVEL V8: {data!r}")
+    print("DEPLOYMENT_MANIFEST: passed (verified PAVEL V8 Studionet deployment)")
     return 0
 
 

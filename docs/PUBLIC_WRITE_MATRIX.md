@@ -1,10 +1,31 @@
 # PAVEL public write matrix
 
-This is the current V7 public-write audit inventory. The V1–V6 records are
-historical; the current V7 source exposes 24 Core
+This is the current V8 public-write audit inventory. The V1–V7 records are
+historical; the current V8 source exposes 24 Core
 writes and 5 Vault writes. A caller is never trusted for economic values:
 Core freezes them and Vault rereads them synchronously through typed views.
 `N/A` in the nondeterministic column means the transition is deterministic.
+
+## V8 contract-to-frontend parity
+
+Every security-relevant action has a canonical read and a postcondition in the
+provider transaction layer. Reads use `LATEST_FINAL`; the browser never treats
+its own submitted transaction as protocol state.
+
+| Contract method | Frontend action | Canonical readback | Postcondition |
+| --- | --- | --- | --- |
+| `define_challenge_evidence` | Define evidence form | `get_dispute`, `get_challenge_evidence` | Evidence count and record advance once |
+| `stage_challenge_evidence` | Stage evidence | `get_dispute`, `get_intent`, `get_snapshot`, `get_settlement_instruction` | `QUALIFYING`, retry, or inadmissible canonical result |
+| `adjudicate_dispute` | Adjudicate action | `get_dispute`, `get_intent`, `get_settlement_instruction` | `RESOLVED` or `ASSESSMENT_RETRY_REQUIRED` |
+| `expire_challenge` | Expire action | `get_dispute`, `get_intent`, `get_settlement_instruction` | `EXPIRED` and blocker removed |
+| `assess_fulfillment` | Assess fulfillment | `get_evidence(intent,1)`, `get_snapshot`, `get_intent`, `get_settlement_instruction` | Authenticated sequence one precedes any outcome |
+| `expire_fulfillment` | Expire fulfillment | `get_intent`, `get_settlement_instruction` | Canonical expiry/refund direction |
+
+The challenge read model also enumerates `get_challenge_count`,
+`get_challenge_id`, `get_dispute`, `get_challenge_evidence`, `get_snapshot`,
+and `get_settlement_instruction` for every relevant Intent. `configure_evidence_recovery`,
+`start_fulfillment`, and `stage_evidence` are covered by the same provider
+postcondition discipline.
 
 ## PavelCore
 
@@ -27,8 +48,8 @@ Core freezes them and Vault rereads them synchronously through typed views.
 | `stage_evidence(intent)` | Permissionless trigger; evidence definitions are already bound | submitted/retry/recovery -> ready/retry/repair | none | web capture consensus / none | immutable snapshot ID; retryable infrastructure vs inadmissible evidence; snapshot cap | `test_core_lifecycle`, `test_web_failure_matrix`, recovery audit |
 | `authorize_intent(intent)` | Permissionless trigger after deterministic preconditions | `EVIDENCE_READY` -> `AUTHORIZED`/`REJECTED`/retry | records authority only; no reservation | V7 bounded authorization consensus / none | exact `pavel-authorization-v2` object; malformed/disagreement -> retry, never rejection; all-true -> `AUTHORIZED`, any false -> deterministic rejection with `failed_checks` | `test_core_lifecycle`, LLM/schema/adversarial suites |
 | `start_fulfillment(intent)` | Permissionless trigger after exact Vault reservation | `AUTHORIZED` -> `FULFILLMENT_PENDING` | no accounting mutation | synchronous Vault reservation view | one-shot state check; missing/mismatched reservation fails | public write surface, lifecycle sequences |
-| `assess_fulfillment(intent)` | Permissionless trigger after fulfillment evidence and reservation | pending -> `FULFILLED`/`NOT_FULFILLED`/retry | records fixed release/refund direction only | two-field semantic vector consensus / synchronous Vault view; seven objective checks are deterministic | full authenticated fulfillment content must be <=4096 bytes; malformed/disagreement -> retry without direction; objective failure -> refund direction | V7 fulfillment suite, schema/adversarial suites |
-| `expire_fulfillment(intent)` | Permissionless after the frozen fulfillment deadline | pending/retry -> `FULFILLMENT_EXPIRED` | records refund direction; no accounting mutation | N/A / synchronous Vault view | deadline required; idempotent state guard; only a matching reservation can transition | V7 fulfillment timeout suite |
+| `assess_fulfillment(intent)` | Permissionless trigger after authenticated sequence-one fulfillment evidence and reservation | pending -> `FULFILLED`/`NOT_FULFILLED`/retry | records fixed release/refund direction only | two-field semantic vector consensus / synchronous Vault view; seven objective checks are deterministic | missing, wrong, staged-only, malformed, or unauthenticated sequence one fails before objective checks and leaves pending; full authenticated content <=4096 bytes | V8 fulfillment gate suite, schema/adversarial suites |
+| `expire_fulfillment(intent)` | Permissionless after the frozen fulfillment deadline | pending/retry -> `FULFILLMENT_EXPIRED` | records refund direction; no accounting mutation | N/A / synchronous Vault view | deadline required; idempotent state guard; only a matching reservation can transition | V8 fulfillment timeout suite |
 | `expire_intent(intent)` | Permissionless | eligible unassessed state -> `EXPIRED` | no funds moved | N/A / none | deadline required; one-shot; never expires authorized/reserved state | `test_public_write_surface::test_expire_intent...` |
 | `open_dispute(intent,reason)` | Any address during challenge window | challenge index append `SUBMITTED` | no funds; not blocking yet | N/A / none | duplicate submission, one unresolved submission per challenger, record cap, deadline, bounded reason; append-only | steward multi-challenge and lifecycle suites |
 | `expire_challenge(id)` | Any address after deadline + 3600s grace | pending/qualifying -> `EXPIRED` | removes only that challenge's blocking count | N/A / none | one-shot; grace-bounded, indexed; no early expiry | challenge admissibility and lifecycle suites |

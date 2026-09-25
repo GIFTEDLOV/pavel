@@ -33,8 +33,9 @@ accounting, and Core-directed settlement.
 | Network | GenLayer Studionet |
 | Chain ID | `61999` |
 | GEN denomination | `1 GEN = 10^18` smallest native units |
-| Core | `0xBA2356FfE5062506FA938da4715c03a2BE7929bF` |
-| Vault | `0x552167Cc0883D02ce42fA2aD64E29Cd10EE3eDFD` |
+| Release | `V8` |
+| Core | `0x1540cEa5d3Df622068B2d3A22aac8Bcb31B900f4` |
+| Vault | `0xac43A164AB9e82d7Af387059c04579FE48050fce` |
 | Authorization | `pavel-authorization-v2` |
 | Fulfillment | `pavel-fulfillment-v2` |
 | Evidence | Authenticated HTTPS snapshots with committed digest and length |
@@ -45,7 +46,9 @@ accounting, and Core-directed settlement.
 | Settlement authority | Core-directed only |
 | Failure recovery | Deterministic fulfillment timeout/refund path |
 | Transaction safety | Same-hash reconciliation; no blind rebroadcast |
-| Hosted lifecycle | PASS |
+| Challenge workflow | QUALIFYING -> CHALLENGE_BLOCKED -> EXPIRED, live proof |
+| Fulfillment gate | Sequence-one authenticated evidence required by Core |
+| Hosted lifecycle | PASS, V8 |
 | Current canonical state | `FULFILLED / RELEASE_PENDING` |
 | External transfer | `UNCONFIRMED` |
 | Application | <https://pavel-nine.vercel.app> |
@@ -54,13 +57,10 @@ accounting, and Core-directed settlement.
 
 ## Steward remediation boundary
 
-The deployed V7 addresses above remain the historical/current deployed release
-and still run the recorded V7 Core source (`4acc04c4...b785a`). This local
-remediation changes Core source to require authenticated canonical fulfillment
-evidence at sequence 1 before assessment (`1636cc81461b...401e60`) and adds
-the complete canonical challenge command/read workflow in the application.
-The corrected source is not deployed, the active addresses are intentionally
-unchanged, and a fresh Core/Vault qualification is pending.
+V8 is the active corrected release. Its Core requires authenticated canonical
+fulfillment evidence at sequence 1 before assessment, and the application
+exposes the complete canonical challenge command/read workflow. The historical
+V7 pair remains preserved in provenance and is not runtime configuration.
 
 Agents can be useful at the boundary between policy and real-world evidence,
 but unrestricted model authority is not an acceptable custody model. PAVEL
@@ -269,7 +269,7 @@ After fulfillment, Core issues one direction such as release to the approved
 counterparty or refund to the principal. Vault accepts only that direction,
 uses a namespaced settlement ID, and rejects duplicate release/refund paths.
 
-The verified V7 lifecycle is `FULFILLED / RELEASE_PENDING`. That means a
+The verified V8 lifecycle is `FULFILLED / RELEASE_PENDING`. That means a
 Core-directed external release request exists and accounting is conserved. It
 does not mean an external transfer has been independently observed as paid.
 
@@ -328,16 +328,16 @@ Once a transaction hash exists, a timeout or RPC interruption is an
 observation problem, not permission to rebroadcast. Checkpoints distinguish a
 transaction hash from a completed business postcondition.
 
-## Verified V7 deployment
+## Verified V8 deployment
 
 | Field | Value |
 | --- | --- |
 | Network | Studionet |
 | Chain ID | `61999` |
 | RPC | `https://studio.genlayer.com/api` |
-| Core | `0xBA2356FfE5062506FA938da4715c03a2BE7929bF` |
-| Vault | `0x552167Cc0883D02ce42fA2aD64E29Cd10EE3eDFD` |
-| Core SHA-256 | `4acc04c4b684b35058b793973eec75569af9e981eb84d33167198615255b785a` |
+| Core | `0x1540cEa5d3Df622068B2d3A22aac8Bcb31B900f4` |
+| Vault | `0xac43A164AB9e82d7Af387059c04579FE48050fce` |
+| Core SHA-256 | `1636cc81461b5536103add686586308a05f599740a4e625e00825d8d11401e60` |
 | Vault SHA-256 | `f671005e07a658a17a7711807d23fa56bf0d6e2e85d0a266eafc17b03455f15c` |
 | Authorization schema | `pavel-authorization-v2` |
 | Fulfillment schema | `pavel-fulfillment-v2` |
@@ -349,37 +349,39 @@ transaction hash from a completed business postcondition.
 | Settlement | `RELEASE_PENDING` |
 | Accounting | Conserved |
 | External settlement | `UNCONFIRMED` |
+| Challenge proof | `QUALIFYING` blocked settlement; `EXPIRED` removed blocker |
 
-V5 and V6 deployments remain immutable audit history. They are not runtime
-defaults and their balances are not counted as V7 accounting.
+V1 through V7 deployments remain immutable audit history. They are not runtime
+defaults and their balances are not counted as V8 accounting.
 
 ## End-to-end qualification
 
-The verified hosted V7 lifecycle covered fresh deployment and binding,
+The verified hosted V8 lifecycle covered fresh deployment and binding,
 principal/agent/counterparty registration, Mandate sealing, deposit, Intent
 creation, authenticated authorization evidence, authorization consensus,
 reservation, complete fulfillment evidence, deterministic objective checks,
 semantic fulfillment, Core settlement direction, and Vault accounting
-readback.
+readback, a qualifying challenge settlement block, canonical expiry, and
+release request after the blocker was removed.
 
 The release gates include:
 
 | Gate | Result |
 | --- | --- |
-| Full Python suite | `168 passed, 1 expected skip` |
+| Full Python suite | `175 passed, 1 skipped` |
 | Full Node suite | `111 passed` |
-| V7 direct tests | `PASS` |
+| V8 Direct/adversarial/state-machine tests | `PASS` |
 | Property tests | `PASS` |
 | Mutation tests | `PASS` |
 | GenVM lint / validation / schema / typecheck | `PASS` |
 | Full Node qualification gate | `111 passed` |
-| Frontend tests | `77 passed` |
+| Frontend tests | `80 passed` |
 | Typecheck / lint / build | `PASS` |
 | Network guard | `PASS` |
 | Secret scan | `PASS` |
 | Source parity | `PASS` |
 | Canonical read smoke | `PASS` |
-| Browser E2E | `15 passed` — desktop 1440px, mobile 430px, mobile 390px |
+| Browser E2E | `21 passed` — desktop 1440px, mobile 430px, mobile 390px |
 
 Browser E2E is a real production Playwright audit. It runs against the built
 Next.js server and covers the 1440px desktop, 430px mobile, and 390px mobile
@@ -499,7 +501,7 @@ passwords, seed phrases, or API tokens in `.env.example` or tracked files.
 ## Verify PAVEL in 5 minutes
 
 1. Open <https://pavel-nine.vercel.app> and confirm the PAVEL branding.
-2. Open `/app/proof` and verify Studionet `61999`, the V7 Core/Vault addresses,
+2. Open `/app/proof` and verify Studionet `61999`, the V8 Core/Vault addresses,
    and the two source hashes.
 3. Confirm authorization is `pavel-authorization-v2` and canonical.
 4. Confirm fulfillment is `pavel-fulfillment-v2` with seven objective checks
@@ -527,7 +529,7 @@ passwords, seed phrases, or API tokens in `.env.example` or tracked files.
 
 ## Current status
 
-PAVEL V7 is the active source-verified release:
+PAVEL V8 is the active source-verified release:
 
 ```text
 Network: Studionet 61999
@@ -538,6 +540,6 @@ Accounting: CONSERVED
 External settlement: UNCONFIRMED
 ```
 
-V1–V6 are preserved as historical qualification records only. The current
+V1–V7 are preserved as historical qualification records only. The current
 source, deployment manifest, GitHub repository, and independent live
-application describe the PAVEL V7 release.
+application describe the PAVEL V8 release.

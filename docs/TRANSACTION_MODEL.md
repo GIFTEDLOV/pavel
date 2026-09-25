@@ -6,7 +6,7 @@ PAVEL writes follow:
 
 The frontend uses stable `genlayer-js` `1.1.8`, persists the ID returned by `writeContract`, and finalizes that same ID with the SDK's official `waitForTransactionReceipt({ status: "FINALIZED", fullTransaction: true })` helper. The receipt exposes separate `statusName`, `resultName`, and `txExecutionResultName` fields; durable UI success requires `statusName === "FINALIZED"` and `txExecutionResultName === "FINISHED_WITH_RETURN"`. Consensus `resultName` values such as `MAJORITY_AGREE` or `MAJORITY_DISAGREE` are not execution-success predicates. `FINALIZED` and successful execution are separate conditions. Polling timeout or network loss is `AMBIGUOUS`, not submission failure, and never authorizes a second broadcast.
 
-The active V7 frontend uses this transaction model for the verified Studionet
+The active V8 frontend uses this transaction model for the verified Studionet
 application. The same-hash coordinator uses the stable SDK helper with bounded
 retries and keeps the transaction persisted for resume after an ambiguous
 timeout. Fee estimation remains an SDK/wallet concern; application value,

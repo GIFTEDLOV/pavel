@@ -22,5 +22,5 @@ export function configuredContracts() {
 }
 
 export function qualificationLabel(): string {
-  return configuredContracts().core && configuredContracts().vault ? "Live V7 Core/Vault pair is source-verified on Studionet 61999." : "No contract addresses configured. This UI will not fabricate chain state.";
+  return configuredContracts().core && configuredContracts().vault ? "Live V8 Core/Vault pair is source-verified on Studionet 61999." : "No contract addresses configured. This UI will not fabricate chain state.";
 }

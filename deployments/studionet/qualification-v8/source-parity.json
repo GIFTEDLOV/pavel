@@ -1,0 +1,15 @@
+{
+  "version": "V8",
+  "sourceCommit": "6819759400b3685d94c4a700433ba685f639a3dd",
+  "core": {
+    "address": "0x1540cEa5d3Df622068B2d3A22aac8Bcb31B900f4",
+    "sha256": "1636cc81461b5536103add686586308a05f599740a4e625e00825d8d11401e60",
+    "byteLength": 114713
+  },
+  "vault": {
+    "address": "0xac43A164AB9e82d7Af387059c04579FE48050fce",
+    "sha256": "f671005e07a658a17a7711807d23fa56bf0d6e2e85d0a266eafc17b03455f15c",
+    "byteLength": 20146
+  },
+  "exact": true
+}

@@ -1,6 +1,6 @@
 # PAVEL deployment
 
-The active PAVEL release is V7 on Studionet. The public source, application,
+The active PAVEL release is V8 on Studionet. The public source, application,
 and runtime configuration are intentionally separate from all other projects.
 
 | Field | Current value |
@@ -10,12 +10,12 @@ and runtime configuration are intentionally separate from all other projects.
 | Network | Studionet |
 | Chain ID | `61999` |
 | RPC | `https://studio.genlayer.com/api` |
-| Core | `0xBA2356FfE5062506FA938da4715c03a2BE7929bF` |
-| Vault | `0x552167Cc0883D02ce42fA2aD64E29Cd10EE3eDFD` |
-| Core SHA-256 | `4acc04c4b684b35058b793973eec75569af9e981eb84d33167198615255b785a` |
+| Core | `0x1540cEa5d3Df622068B2d3A22aac8Bcb31B900f4` |
+| Vault | `0xac43A164AB9e82d7Af387059c04579FE48050fce` |
+| Core SHA-256 | `1636cc81461b5536103add686586308a05f599740a4e625e00825d8d11401e60` |
 | Vault SHA-256 | `f671005e07a658a17a7711807d23fa56bf0d6e2e85d0a266eafc17b03455f15c` |
 
-The V7 pair is source-parity verified and bidirectionally bound. The hosted
+The V8 pair is source-parity verified and bidirectionally bound. The hosted
 qualification lifecycle reached canonical `FULFILLED` and
 `RELEASE_PENDING`; accounting is conserved and external settlement remains
 `UNCONFIRMED`. No document in this repository treats that state as paid.
@@ -49,21 +49,23 @@ address through the stable CLI address-calldata path. The Vault account is
 locked, so no deployment command is executed by automation without a secure
 existing signing session.
 
-### V7 lifecycle provenance
+### V8 lifecycle provenance
 
-The current source-verified V7 qualification pair is on stable Studionet
+The current source-verified V8 qualification pair is on stable Studionet
 (chain 61999):
 
-- Core: `0xBA2356FfE5062506FA938da4715c03a2BE7929bF`
-- Vault: `0x552167Cc0883D02ce42fA2aD64E29Cd10EE3eDFD`
-- Core SHA-256: `4acc04c4b684b35058b793973eec75569af9e981eb84d33167198615255b785a`
+- Core: `0x1540cEa5d3Df622068B2d3A22aac8Bcb31B900f4`
+- Vault: `0xac43A164AB9e82d7Af387059c04579FE48050fce`
+- Core SHA-256: `1636cc81461b5536103add686586308a05f599740a4e625e00825d8d11401e60`
 - Vault SHA-256: `f671005e07a658a17a7711807d23fa56bf0d6e2e85d0a266eafc17b03455f15c`
 
-The fresh V7 lifecycle was reconciled through canonical authorization,
-reservation, full-content fulfillment, and `RELEASE_PENDING`. The Vault
-settlement record correctly remains `UNCONFIRMED` until an external
-observation exists. V5/V6 reservations remain historical and are not counted
-or migrated into V7.
+The fresh V8 lifecycle was reconciled through canonical authorization,
+reservation, full-content fulfillment, a qualifying challenge settlement
+block, contract-enforced expiry, and `RELEASE_PENDING`. The Vault settlement
+record correctly remains `UNCONFIRMED` until an external observation exists.
+V5/V6/V7 reservations remain historical and are not counted or migrated into
+V8. The complete sanitized proof is under
+`deployments/studionet/qualification-v8/`.
 
 ### HISTORICAL — V6 fulfillment loss boundary
 

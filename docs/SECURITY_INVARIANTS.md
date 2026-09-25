@@ -1,7 +1,7 @@
 # Security invariants
 
 The following are machine-testable security invariants implemented or exercised
-by the current V7 source:
+by the current V8 source:
 
 32. `assess_fulfillment` cannot evaluate objective checks, invoke semantic
     consensus, or write an outcome until canonical sequence-one `FULFILLMENT`
@@ -50,7 +50,7 @@ by the current V7 source:
     3600-second grace window ends retry intake and permits deterministic expiry.
 28. A transport recovery changes availability only; it cannot change source
     authority, identity fingerprint, evidence set membership, or snapshot ID.
-29. V7 fulfillment objective checks are computed from canonical state; they are
+29. V8 fulfillment objective checks are computed from canonical state; they are
     not delegated back to the semantic reviewer.
 30. A fulfillment artifact larger than 4096 bytes cannot be authenticated as an
     accepted fulfillment review input, so no accepted fulfillment decision is

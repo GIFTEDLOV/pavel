@@ -1,0 +1,190 @@
+{
+  "version": "V8",
+  "prematureAssessment": {
+    "liveTransactionSent": false,
+    "result": "NOT_SENT",
+    "proof": "Direct Mode adversarial/state-machine regression plus deployed-source parity; no deliberate reverting Studionet write was sent."
+  },
+  "sequenceZeroAuthorization": {
+    "url": "https://raw.githubusercontent.com/GIFTEDLOV/pavel/555b0d62f8c854913b8591204d854c608756a46c/docs/ARCHITECTURE.md",
+    "sha256": "4cbff61d228073e7a387e92f795b5732441c57d0b0c470c0452be882c015b605",
+    "byteLength": 2470,
+    "definition": {
+      "approved_recovery_authority": "raw.githubusercontent.com",
+      "challenge_id": "",
+      "committed_byte_length": "2470",
+      "committed_sha256": "4cbff61d228073e7a387e92f795b5732441c57d0b0c470c0452be882c015b605",
+      "created_at": "2026-09-25T16:01:14.473931Z",
+      "evidence_id": "E-1",
+      "evidence_kind": "PRODUCT_SERVICE",
+      "expected_authority": "raw.githubusercontent.com",
+      "expected_hash": "4cbff61d228073e7a387e92f795b5732441c57d0b0c470c0452be882c015b605",
+      "identity_fingerprint": "846e111f0346b2e70fe937ebab371711ce5792c7333e44b161c83ea180d8b7da",
+      "intent_id": "I-1",
+      "mandate_id": "M-1",
+      "origin_url": "https://raw.githubusercontent.com/GIFTEDLOV/pavel/555b0d62f8c854913b8591204d854c608756a46c/docs/ARCHITECTURE.md",
+      "policy_fingerprint": "6580710e63d40399b944032fdc7dfad426c70c2ec04c27755a61bc9ed53a294c",
+      "sequence": "0"
+    }
+  },
+  "sequenceOneFulfillment": {
+    "url": "https://raw.githubusercontent.com/GIFTEDLOV/pavel/555b0d62f8c854913b8591204d854c608756a46c/docs/ARCHITECTURE.md",
+    "sha256": "4cbff61d228073e7a387e92f795b5732441c57d0b0c470c0452be882c015b605",
+    "byteLength": 2470,
+    "defineTx": "0x7bd612884c9dcf2582024ab7e56d6382709371f1a266c59d72bcdcf65ada8608",
+    "stageTx": "0x5cd0a84eec081644547b16a477671c971e6a0c961b734f94542e7e10cce0680f",
+    "canonicalReadback": {
+      "intent": {
+        "agent": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "amount": "1",
+        "authorization": "{\"decision\":\"AUTHORIZED\",\"failed_checks\":[],\"intent_fingerprint\":\"6580710e63d40399b944032fdc7dfad426c70c2ec04c27755a61bc9ed53a294c\",\"mandate_fingerprint\":\"f63ded3242cb4d6f426d77d9502bd3da28c1eb883e94baab28757b6e0e7eb1b1\",\"reason_code\":\"AUTHORIZED_ALL_CHECKS_PASSED\",\"reviewed_at\":\"2026-09-25T16:02:41.625318Z\",\"schema\":\"pavel-authorization-v2\",\"semantic_schema_version\":\"2\",\"snapshot_id\":\"S-1\",\"vector\":{\"activity_permitted\":true,\"authority_scope_preserved\":true,\"commercial_terms_consistent\":true,\"constitution_satisfied\":true,\"counterparty_scope_satisfied\":true,\"deliverable_in_scope\":true,\"duplicate_semantic_purchase_absent\":true,\"evidence_semantically_sufficient\":true,\"external_dependencies_disclosed\":true,\"fulfillment_terms_defined\":true,\"prohibited_activity_absent\":true,\"purpose_aligned\":true}}",
+        "challenge_deadline": "0",
+        "challenge_decision_id": "",
+        "commercial_terms": "Exactly one smallest native GEN unit; no commercial expansion or substitution.",
+        "counterparty": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "counterparty_authority_origin": "raw.githubusercontent.com",
+        "counterparty_identity_fingerprint": "72d2e85f400c2e9f16cb1518d7ca73c8c1f4b5151e2c060c434a38369efaa2e7",
+        "counterparty_identity_id": "C-1",
+        "created_at": "2026-09-25T15:59:51.501451Z",
+        "current_snapshot_id": "S-2",
+        "deliverable": "Completion requires the complete authenticated artifact exact immutable PAVEL artifact URL=https://raw.githubusercontent.com/GIFTEDLOV/pavel/555b0d62f8c854913b8591204d854c608756a46c/docs/ARCHITECTURE.md; sha256=4cbff61d228073e7a387e92f795b5732441c57d0b0c470c0452be882c015b605; byte_length=2470.",
+        "evidence_set_identity": "a9d6e4d4cbb3fa2a39b807d70e52abaf11d94856f81d023ca9ac5cd8840e45e9",
+        "expires_at": "1790359190",
+        "fulfillment": "",
+        "fulfillment_criteria": "The complete committed artifact must be authenticated and match the exact identity.",
+        "fulfillment_deadline": "1790359190",
+        "intent_fingerprint": "6580710e63d40399b944032fdc7dfad426c70c2ec04c27755a61bc9ed53a294c",
+        "intent_id": "I-1",
+        "last_error": "",
+        "mandate_id": "M-1",
+        "pre_challenge_status": "",
+        "principal": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "purpose": "Retrieve and deliver exact immutable PAVEL artifact URL=https://raw.githubusercontent.com/GIFTEDLOV/pavel/555b0d62f8c854913b8591204d854c608756a46c/docs/ARCHITECTURE.md; sha256=4cbff61d228073e7a387e92f795b5732441c57d0b0c470c0452be882c015b605; byte_length=2470.",
+        "recipient": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "settlement_direction": "",
+        "settlement_ready_at": "0",
+        "status": "FULFILLMENT_PENDING",
+        "submitted_at": "2026-09-25T16:00:31.935803Z",
+        "title": "Exact immutable PAVEL protocol artifact"
+      },
+      "definition": {
+        "approved_recovery_authority": "raw.githubusercontent.com",
+        "challenge_id": "",
+        "committed_byte_length": "2470",
+        "committed_sha256": "4cbff61d228073e7a387e92f795b5732441c57d0b0c470c0452be882c015b605",
+        "created_at": "2026-09-25T16:05:13.804974Z",
+        "evidence_id": "E-2",
+        "evidence_kind": "FULFILLMENT",
+        "expected_authority": "raw.githubusercontent.com",
+        "expected_hash": "4cbff61d228073e7a387e92f795b5732441c57d0b0c470c0452be882c015b605",
+        "identity_fingerprint": "01c3192e1d4edb2f1b551ca7640449d4cb69ec828e5f86c1dc99ca692d62d35e",
+        "intent_id": "I-1",
+        "mandate_id": "M-1",
+        "origin_url": "https://raw.githubusercontent.com/GIFTEDLOV/pavel/555b0d62f8c854913b8591204d854c608756a46c/docs/ARCHITECTURE.md",
+        "policy_fingerprint": "6580710e63d40399b944032fdc7dfad426c70c2ec04c27755a61bc9ed53a294c",
+        "sequence": "1"
+      },
+      "snapshot": {
+        "captured_at": "2026-09-25T16:05:50.734478Z",
+        "captures": [
+          {
+            "byte_length": 2470,
+            "capture_class": "AUTHENTICATED",
+            "content": "# Architecture\n\nPAVEL separates constitutional authority from economic custody.\n\n## PavelCore\n\nCore owns principals, registered agents, authority-bound counterparty identities, Mandates, definition fingerprints, delegation ancestry, Intents, evidence definitions, staged capture results, immutable snapshots, semantic vectors, permissionless independently indexed challenges, challenge deadlines, revocation, and settlement directions. Core never stores a Vault balance as authoritative truth.\n\n## PavelVault\n\nVault owns GEN deposits, available and reserved funds, pending outbound balances, recovery totals, per-Mandate budgets, epoch accounting, reservations, settlement IDs, and solvency/conservation reads. A payable deposit derives its principal from Core and `gl.message.sender_address`; the frontend cannot assign a deposit to somebody else.\n\n## Cross-contract boundary\n\n`@gl.contract_interface` is used for Core/Vault typed synchronous view calls. A Core-to-Vault write is never treated as atomic or synchronous. The flow is pull-verification:\n\n1. Core records `AUTHORIZED` and frozen economic terms.\n2. A permitted caller invokes `Vault.reserve(intent_id)`.\n3. Vault reads Core and deterministically reserves exact frozen values.\n4. Core reads Vault reservation state before fulfillment review.\n5. Core records a release/refund direction after fulfillment or dispute.\n6. A caller invokes Vault settlement; Vault reads Core, moves accounting once, and emits the finalized external transfer.\n\nInternal write-message semantics therefore do not create a hidden callback or shadow ledger. The Vault binding is one-time: Vault is constructed with Core, its deployment binding admin calls `bind_core()`, and Core owner calls `set_vault_address()` once. Both addresses are readable and immutable after binding. Consequently a V6 Core cannot be attached to the deployed V5 Vault, and a fresh V6 Vault cannot inherit V5's stored deposit or Core records without an explicit migration interface; none exists in the deployed contracts.\n\n## Frontend trust boundary\n\nThe browser is an untrusted transaction initiator and read client. It does not contain a server wallet, authoritative database, fabricated statistics, or automatic rebroadcast. It persists the transaction ID immediately after broadcast and reconciles the same ID through consensus status, finalization, execution result, and Core/Vault readback. Unassessed and evidence-ready states remain neutral in the UI.\n",
+            "evidence_id": "E-2",
+            "excerpt": "# Architecture\n\nPAVEL separates constitutional authority from economic custody.\n\n## PavelCore\n\nCore owns principals, registered agents, authority-bound counterparty identities, Mandates, definition fingerprints, delegation ancestry, Intents, evidence definitions, staged capture results, immutable snapshots, semantic vectors, permissionless independently indexed challenges, challenge deadlines, revocation, and settlement directions. Core never stores a Vault balance as authoritative truth.\n\n## PavelVault\n\nVault owns GEN deposits, available and reserved funds, pending outbound balances, recovery totals, per-Mandate budgets, epoch accounting, reservations, settlement IDs, and solvency/conservation reads. A payable deposit derives its principal from Core and `gl.message.sender_address`; the frontend cannot assign a deposit to somebody else.\n\n## Cross-contract boundary\n\n`@gl.contract_interface` is used for Core/Vault typed synchronous view calls. A Core-to-Vault write is never treated as atomic or synchronous. The flow is pull-verification:\n\n1. Core records `AUTHORIZED` and frozen economic terms.\n2. A permitted caller invokes `Vault.reserve(intent_id)`.\n3. Vault reads Core and deterministically reserves exact frozen values.\n4. Core reads Vault reservation state before fulfillment review.\n5. Core records a release/refund direction after fulfillment or dispute.\n6. A caller invokes Vault settlement; Vault reads Core, moves accounting once, and emits the finalized external transfer.\n\nInternal write-message semantics therefore do not create a hidden callback or shadow ledger. The Vault binding is one-time: Vault is constructed with Core, its deployment binding admin calls `bind_core()`, and Core owner calls `set_vault_address()` once. Both addresses are readable and immutable after binding. Consequently a V6 Core cannot be attached to the deployed V5 Vault, and a fresh V6 Vault cannot inherit V5's stored deposit or Core records without an explicit migration interface; none exists in the deployed contracts.\n\n## Frontend tru",
+            "sequence": "1",
+            "sha256": "4cbff61d228073e7a387e92f795b5732441c57d0b0c470c0452be882c015b605",
+            "status": 200,
+            "transport_url": "https://raw.githubusercontent.com/GIFTEDLOV/pavel/555b0d62f8c854913b8591204d854c608756a46c/docs/ARCHITECTURE.md",
+            "url": "https://raw.githubusercontent.com/GIFTEDLOV/pavel/555b0d62f8c854913b8591204d854c608756a46c/docs/ARCHITECTURE.md"
+          }
+        ],
+        "evidence_set_identity": "b7e92eea541a090355eba04c6c792a5c3a7e9cf61ceb025e53f89cd4a96f8480",
+        "fingerprint": "70d730765da09a8d95edbf440a8823a0a55daac012169282d08ed1f475a24d42",
+        "intent_id": "I-1",
+        "mandate_id": "M-1",
+        "parent_snapshot_id": "S-1",
+        "policy_version": "1",
+        "snapshot_id": "S-2"
+      }
+    }
+  },
+  "assessment": {
+    "tx": "0xe4f84127a6edbdf822afaed6466c3d2d934be080054969a1b7d5bcbbf4924e6a",
+    "canonicalReadback": {
+      "intent": {
+        "agent": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "amount": "1",
+        "authorization": "{\"decision\":\"AUTHORIZED\",\"failed_checks\":[],\"intent_fingerprint\":\"6580710e63d40399b944032fdc7dfad426c70c2ec04c27755a61bc9ed53a294c\",\"mandate_fingerprint\":\"f63ded3242cb4d6f426d77d9502bd3da28c1eb883e94baab28757b6e0e7eb1b1\",\"reason_code\":\"AUTHORIZED_ALL_CHECKS_PASSED\",\"reviewed_at\":\"2026-09-25T16:02:41.625318Z\",\"schema\":\"pavel-authorization-v2\",\"semantic_schema_version\":\"2\",\"snapshot_id\":\"S-1\",\"vector\":{\"activity_permitted\":true,\"authority_scope_preserved\":true,\"commercial_terms_consistent\":true,\"constitution_satisfied\":true,\"counterparty_scope_satisfied\":true,\"deliverable_in_scope\":true,\"duplicate_semantic_purchase_absent\":true,\"evidence_semantically_sufficient\":true,\"external_dependencies_disclosed\":true,\"fulfillment_terms_defined\":true,\"prohibited_activity_absent\":true,\"purpose_aligned\":true}}",
+        "challenge_deadline": "1790352636",
+        "challenge_decision_id": "",
+        "commercial_terms": "Exactly one smallest native GEN unit; no commercial expansion or substitution.",
+        "counterparty": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "counterparty_authority_origin": "raw.githubusercontent.com",
+        "counterparty_identity_fingerprint": "72d2e85f400c2e9f16cb1518d7ca73c8c1f4b5151e2c060c434a38369efaa2e7",
+        "counterparty_identity_id": "C-1",
+        "created_at": "2026-09-25T15:59:51.501451Z",
+        "current_snapshot_id": "S-2",
+        "deliverable": "Completion requires the complete authenticated artifact exact immutable PAVEL artifact URL=https://raw.githubusercontent.com/GIFTEDLOV/pavel/555b0d62f8c854913b8591204d854c608756a46c/docs/ARCHITECTURE.md; sha256=4cbff61d228073e7a387e92f795b5732441c57d0b0c470c0452be882c015b605; byte_length=2470.",
+        "evidence_set_identity": "a9d6e4d4cbb3fa2a39b807d70e52abaf11d94856f81d023ca9ac5cd8840e45e9",
+        "expires_at": "1790359190",
+        "fulfillment": "{\"failed_checks\":[],\"fulfillment_deadline\":\"1790359190\",\"intent_fingerprint\":\"6580710e63d40399b944032fdc7dfad426c70c2ec04c27755a61bc9ed53a294c\",\"mandate_fingerprint\":\"f63ded3242cb4d6f426d77d9502bd3da28c1eb883e94baab28757b6e0e7eb1b1\",\"objective_checks\":{\"authorized_deliverable_identified\":true,\"delivery_corresponds_to_intent\":true,\"evidence_authentic\":true,\"mandate_requirements_preserved\":true,\"no_material_substitution\":true,\"provider_identity_consistent\":true,\"quantity_consistent\":true},\"result_status\":\"FULFILLED\",\"reviewed_at\":\"2026-09-25T16:08:36.529772Z\",\"schema\":\"pavel-fulfillment-v2\",\"semantic_evaluation\":\"CONSENSUS_ACCEPTED\",\"semantic_vector\":{\"completion_evidence_sufficient\":true,\"material_terms_satisfied\":true},\"snapshot_id\":\"S-2\"}",
+        "fulfillment_criteria": "The complete committed artifact must be authenticated and match the exact identity.",
+        "fulfillment_deadline": "1790359190",
+        "intent_fingerprint": "6580710e63d40399b944032fdc7dfad426c70c2ec04c27755a61bc9ed53a294c",
+        "intent_id": "I-1",
+        "last_error": "",
+        "mandate_id": "M-1",
+        "pre_challenge_status": "",
+        "principal": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "purpose": "Retrieve and deliver exact immutable PAVEL artifact URL=https://raw.githubusercontent.com/GIFTEDLOV/pavel/555b0d62f8c854913b8591204d854c608756a46c/docs/ARCHITECTURE.md; sha256=4cbff61d228073e7a387e92f795b5732441c57d0b0c470c0452be882c015b605; byte_length=2470.",
+        "recipient": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "settlement_direction": "RELEASE_TO_COUNTERPARTY",
+        "settlement_ready_at": "1790352636",
+        "status": "FULFILLED",
+        "submitted_at": "2026-09-25T16:00:31.935803Z",
+        "title": "Exact immutable PAVEL protocol artifact"
+      },
+      "settlement": {
+        "amount": "1",
+        "challenge_deadline": "1790352636",
+        "direction": "RELEASE_TO_COUNTERPARTY",
+        "fulfillment_deadline": "1790359190",
+        "fulfillment_result": {
+          "failed_checks": [],
+          "fulfillment_deadline": "1790359190",
+          "intent_fingerprint": "6580710e63d40399b944032fdc7dfad426c70c2ec04c27755a61bc9ed53a294c",
+          "mandate_fingerprint": "f63ded3242cb4d6f426d77d9502bd3da28c1eb883e94baab28757b6e0e7eb1b1",
+          "objective_checks": {
+            "authorized_deliverable_identified": true,
+            "delivery_corresponds_to_intent": true,
+            "evidence_authentic": true,
+            "mandate_requirements_preserved": true,
+            "no_material_substitution": true,
+            "provider_identity_consistent": true,
+            "quantity_consistent": true
+          },
+          "result_status": "FULFILLED",
+          "reviewed_at": "2026-09-25T16:08:36.529772Z",
+          "schema": "pavel-fulfillment-v2",
+          "semantic_evaluation": "CONSENSUS_ACCEPTED",
+          "semantic_vector": {
+            "completion_evidence_sufficient": true,
+            "material_terms_satisfied": true
+          },
+          "snapshot_id": "S-2"
+        },
+        "intent_fingerprint": "6580710e63d40399b944032fdc7dfad426c70c2ec04c27755a61bc9ed53a294c",
+        "intent_id": "I-1",
+        "mandate_id": "M-1",
+        "oldest_open_challenge": "",
+        "principal": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "ready_at": "1790352636",
+        "recipient": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "status": "FULFILLED"
+      }
+    }
+  },
+  "invariant": "assess_fulfillment is contract-gated before objective checks, semantic consensus, and fulfillment/settlement mutation."
+}
