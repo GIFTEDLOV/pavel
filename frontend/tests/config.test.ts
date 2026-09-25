@@ -6,8 +6,8 @@ describe("contract configuration honesty", () => {
     delete process.env.NEXT_PUBLIC_PAVEL_CORE_ADDRESS;
     delete process.env.NEXT_PUBLIC_PAVEL_VAULT_ADDRESS;
     expect(configuredContracts()).toEqual({
-      core: "0xBA2356FfE5062506FA938da4715c03a2BE7929bF",
-      vault: "0x552167Cc0883D02ce42fA2aD64E29Cd10EE3eDFD",
+      core: "0x1540cEa5d3Df622068B2d3A22aac8Bcb31B900f4",
+      vault: "0xac43A164AB9e82d7Af387059c04579FE48050fce",
     });
   });
 

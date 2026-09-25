@@ -30,6 +30,7 @@ export type ProtocolStatus =
   | "CHALLENGE_INADMISSIBLE"
   | "CHALLENGE_QUALIFYING"
   | "ASSESSMENT_PENDING"
+  | "ASSESSMENT_RETRY_REQUIRED"
   | "CHALLENGE_RESOLVED"
   | "CHALLENGE_EXPIRED"
   | "SETTLEMENT_BLOCKED"
@@ -74,6 +75,8 @@ export type ChallengeStatus =
   | "ASSESSMENT_RETRY_REQUIRED"
   | "RESOLVED"
   | "EXPIRED";
+
+export type ChallengeResolution = "RELEASE_TO_COUNTERPARTY" | "REFUND_TO_PRINCIPAL";
 
 export type SettlementDirection = "RELEASE_TO_COUNTERPARTY" | "REFUND_TO_PRINCIPAL" | "INDETERMINATE_RETRY";
 
@@ -163,6 +166,68 @@ export interface EvidenceRecord {
   sequence: string;
   policy_fingerprint: string;
   identity_fingerprint: string;
+  challenge_id?: string;
+  capture?: EvidenceCapture;
+  snapshot_id?: string;
+  captured?: boolean;
+  authenticated?: boolean;
+  [key: string]: unknown;
+}
+
+export interface EvidenceCapture {
+  evidence_id: string;
+  sequence: string;
+  url: string;
+  transport_url: string;
+  status: number;
+  capture_class: "AUTHENTICATED" | "INFRASTRUCTURE_FAILURE" | "MALFORMED_EVIDENCE" | string;
+  sha256: string;
+  byte_length: number;
+  content?: string;
+  excerpt?: string;
+}
+
+export interface SnapshotRecord {
+  snapshot_id: string;
+  intent_id: string;
+  mandate_id: string;
+  parent_snapshot_id: string;
+  captured_at: string;
+  policy_version: string;
+  evidence_set_identity: string;
+  fingerprint: string;
+  captures: EvidenceCapture[];
+  challenge_id?: string;
+  [key: string]: unknown;
+}
+
+export interface ChallengeEvidenceRecord extends EvidenceRecord {
+  challenge_id: string;
+}
+
+export interface ChallengeRecord {
+  challenge_id: string;
+  dispute_id: string;
+  intent_id: string;
+  challenger: Address;
+  reason: string;
+  opened_at: string;
+  deadline: string;
+  original_fulfillment: string;
+  original_snapshot_id: string;
+  base_intent_status: string;
+  status: ChallengeStatus;
+  last_error: string;
+  evidence_ids: string;
+  evidence_ids_hash: string;
+  evidence_set_identity: string;
+  independent_snapshot_id: string;
+  adjudication: string;
+  resolution?: ChallengeResolution;
+  resolved_at: string;
+  submission_fingerprint: string;
+  fingerprint: string;
+  [key: string]: unknown;
 }
 
 export interface AuthorizationView {

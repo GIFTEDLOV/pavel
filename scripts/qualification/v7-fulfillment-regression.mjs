@@ -31,7 +31,8 @@ test("V7 rejects arbitrary fulfillment truncation", () => {
   assert.match(core, /MAX_FULFILLMENT_EVIDENCE_BYTES = 4096/);
   assert.match(core, /definition\.get\("evidence_kind"\) == "FULFILLMENT" and len\(raw\) > MAX_FULFILLMENT_EVIDENCE_BYTES/);
   assert.match(core, /result\["content"\] = text if definition\.get\("evidence_kind"\) == "FULFILLMENT"/);
-  assert.match(core, /len\(content_bytes\) > MAX_FULFILLMENT_EVIDENCE_BYTES/);
+  assert.match(core, /committed_length <= MAX_FULFILLMENT_EVIDENCE_BYTES/);
+  assert.match(core, /len\(content_bytes\) == committed_length/);
   const contextBlock = core.match(/def _fulfillment_evidence_context[\s\S]*?(?=\n    def _fulfillment_objective_checks)/)?.[0] ?? "";
   assert.notEqual(contextBlock, "");
   assert.doesNotMatch(contextBlock, /capture\["content"\]\[:MAX_EXCERPT\]/);

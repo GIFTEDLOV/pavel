@@ -1,0 +1,41 @@
+{
+  "version": "V8",
+  "mandateId": "M-1",
+  "intentId": "I-1",
+  "accounting": {
+    "available": "0",
+    "committed": "1",
+    "conserved": true,
+    "deposited": "1",
+    "epoch_spent": "1",
+    "epoch_start": "1790351925",
+    "mandate_id": "M-1",
+    "recovered": "0",
+    "refund_pending": "0",
+    "release_pending": "1",
+    "reserved": "0"
+  },
+  "conservation": {
+    "available": "0",
+    "reserved": "0",
+    "releasePending": "1",
+    "refundPending": "0",
+    "recovered": "0",
+    "deposited": "1",
+    "conserved": true,
+    "reservedAfterSettlementRequest": true
+  },
+  "settlement": {
+    "amount": "1",
+    "direction": "RELEASE_TO_COUNTERPARTY",
+    "external_observation": "UNCONFIRMED",
+    "intent_id": "I-1",
+    "mandate_id": "M-1",
+    "recipient": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+    "replay_key": "SETTLE:V1:53a7547d4563326bb5292b8f889e77374746a42b8d7bdc56ff97d02c138c5915",
+    "requested_at": "2026-09-25T17:25:32.429728Z",
+    "settlement_id": "SETTLE:V1:53a7547d4563326bb5292b8f889e77374746a42b8d7bdc56ff97d02c138c5915",
+    "status": "RELEASE_PENDING"
+  },
+  "externalObservation": "UNCONFIRMED"
+}

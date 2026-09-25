@@ -1,6 +1,6 @@
 # Fee policy note
 
-PAVEL V7 targets stable GenLayer Studionet (`chainId` `61999`) and pins the
+PAVEL V8 targets stable GenLayer Studionet (`chainId` `61999`) and pins the
 stable `genlayer-js` `1.1.8` release family. The exact installed package was
 inspected from `frontend/node_modules/genlayer-js/package.json` and its
 `1.1.8` declaration bundle. It exposes legacy `estimateTransactionGas` and the

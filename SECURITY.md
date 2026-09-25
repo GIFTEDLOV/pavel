@@ -1,6 +1,6 @@
 # Security posture
 
-PAVEL V7 is source-verified on Studionet and has completed its hosted
+PAVEL V8 is source-verified on Studionet and has completed its hosted
 qualification lifecycle. The external settlement observation remains
 `UNCONFIRMED`; this repository does not claim external payment completion. The
 current security boundary is:
@@ -14,6 +14,11 @@ current security boundary is:
 - `SUBMITTED`, `EVIDENCE_READY`, and `AUTHORIZATION_PENDING` remain explicitly unassessed; they are not rendered as consensus-cleared.
 - registered counterparty identities bind wallet, approved authority origin, and fingerprint; URLs cannot redefine identity.
 - recovery changes evidence availability only, and permissionless challenge indexes are append-only and settlement-blocking.
+- Core rejects fulfillment assessment until canonical sequence-one fulfillment
+  evidence is authenticated; this is a contract invariant, not only a UI gate.
+- `SUBMITTED` challenges do not block settlement. Only authenticated
+  `QUALIFYING` challenges block, and the V8 proof records both the blocker and
+  its contract-enforced expiry.
 
 Before changing the deployed contracts, run the complete qualification suite
 against the exact source commit, extract and review schemas, update the

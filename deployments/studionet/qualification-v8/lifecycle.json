@@ -1,0 +1,184 @@
+{
+  "version": "V8",
+  "signer": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+  "mandateId": "M-1",
+  "intentId": "I-1",
+  "authorization": {
+    "tx": "0xf4c915ec05f38361a94dd0d838190412918b3345c8af302a53f150832aa9fc66",
+    "state": {
+      "agent": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+      "amount": "1",
+      "authorization": "{\"decision\":\"AUTHORIZED\",\"failed_checks\":[],\"intent_fingerprint\":\"6580710e63d40399b944032fdc7dfad426c70c2ec04c27755a61bc9ed53a294c\",\"mandate_fingerprint\":\"f63ded3242cb4d6f426d77d9502bd3da28c1eb883e94baab28757b6e0e7eb1b1\",\"reason_code\":\"AUTHORIZED_ALL_CHECKS_PASSED\",\"reviewed_at\":\"2026-09-25T16:02:41.625318Z\",\"schema\":\"pavel-authorization-v2\",\"semantic_schema_version\":\"2\",\"snapshot_id\":\"S-1\",\"vector\":{\"activity_permitted\":true,\"authority_scope_preserved\":true,\"commercial_terms_consistent\":true,\"constitution_satisfied\":true,\"counterparty_scope_satisfied\":true,\"deliverable_in_scope\":true,\"duplicate_semantic_purchase_absent\":true,\"evidence_semantically_sufficient\":true,\"external_dependencies_disclosed\":true,\"fulfillment_terms_defined\":true,\"prohibited_activity_absent\":true,\"purpose_aligned\":true}}",
+      "challenge_deadline": "0",
+      "challenge_decision_id": "",
+      "commercial_terms": "Exactly one smallest native GEN unit; no commercial expansion or substitution.",
+      "counterparty": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+      "counterparty_authority_origin": "raw.githubusercontent.com",
+      "counterparty_identity_fingerprint": "72d2e85f400c2e9f16cb1518d7ca73c8c1f4b5151e2c060c434a38369efaa2e7",
+      "counterparty_identity_id": "C-1",
+      "created_at": "2026-09-25T15:59:51.501451Z",
+      "current_snapshot_id": "S-1",
+      "deliverable": "Completion requires the complete authenticated artifact exact immutable PAVEL artifact URL=https://raw.githubusercontent.com/GIFTEDLOV/pavel/555b0d62f8c854913b8591204d854c608756a46c/docs/ARCHITECTURE.md; sha256=4cbff61d228073e7a387e92f795b5732441c57d0b0c470c0452be882c015b605; byte_length=2470.",
+      "evidence_set_identity": "a9d6e4d4cbb3fa2a39b807d70e52abaf11d94856f81d023ca9ac5cd8840e45e9",
+      "expires_at": "1790359190",
+      "fulfillment": "",
+      "fulfillment_criteria": "The complete committed artifact must be authenticated and match the exact identity.",
+      "fulfillment_deadline": "0",
+      "intent_fingerprint": "6580710e63d40399b944032fdc7dfad426c70c2ec04c27755a61bc9ed53a294c",
+      "intent_id": "I-1",
+      "last_error": "",
+      "mandate_id": "M-1",
+      "pre_challenge_status": "",
+      "principal": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+      "purpose": "Retrieve and deliver exact immutable PAVEL artifact URL=https://raw.githubusercontent.com/GIFTEDLOV/pavel/555b0d62f8c854913b8591204d854c608756a46c/docs/ARCHITECTURE.md; sha256=4cbff61d228073e7a387e92f795b5732441c57d0b0c470c0452be882c015b605; byte_length=2470.",
+      "recipient": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+      "settlement_direction": "",
+      "settlement_ready_at": "0",
+      "status": "AUTHORIZED",
+      "submitted_at": "2026-09-25T16:00:31.935803Z",
+      "title": "Exact immutable PAVEL protocol artifact"
+    }
+  },
+  "reservation": {
+    "tx": "0xcb1ed11d7fbf43ec0381f6bfee411b81632e63e81bc92ca4aba31ee7e8201941",
+    "state": {
+      "reservation": {
+        "agent": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "amount": "1",
+        "counterparty": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "intent_fingerprint": "6580710e63d40399b944032fdc7dfad426c70c2ec04c27755a61bc9ed53a294c",
+        "intent_id": "I-1",
+        "mandate_id": "M-1",
+        "principal": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "recipient": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "reserved_at": "2026-09-25T16:03:47.069094Z",
+        "settlement_id": "",
+        "status": "RESERVED"
+      },
+      "accounting": {
+        "available": "0",
+        "committed": "1",
+        "conserved": true,
+        "deposited": "1",
+        "epoch_spent": "1",
+        "epoch_start": "1790351925",
+        "mandate_id": "M-1",
+        "recovered": "0",
+        "refund_pending": "0",
+        "release_pending": "0",
+        "reserved": "1"
+      }
+    }
+  },
+  "fulfillment": {
+    "startTx": "0x31f1c44afe02e43d62cf9ebcb4e1655b3d4353f3be26d6b7c8506d47b697dd57",
+    "definitionTx": "0x7bd612884c9dcf2582024ab7e56d6382709371f1a266c59d72bcdcf65ada8608",
+    "stageTx": "0x5cd0a84eec081644547b16a477671c971e6a0c961b734f94542e7e10cce0680f",
+    "assessmentTx": "0xe4f84127a6edbdf822afaed6466c3d2d934be080054969a1b7d5bcbbf4924e6a",
+    "state": {
+      "intent": {
+        "agent": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "amount": "1",
+        "authorization": "{\"decision\":\"AUTHORIZED\",\"failed_checks\":[],\"intent_fingerprint\":\"6580710e63d40399b944032fdc7dfad426c70c2ec04c27755a61bc9ed53a294c\",\"mandate_fingerprint\":\"f63ded3242cb4d6f426d77d9502bd3da28c1eb883e94baab28757b6e0e7eb1b1\",\"reason_code\":\"AUTHORIZED_ALL_CHECKS_PASSED\",\"reviewed_at\":\"2026-09-25T16:02:41.625318Z\",\"schema\":\"pavel-authorization-v2\",\"semantic_schema_version\":\"2\",\"snapshot_id\":\"S-1\",\"vector\":{\"activity_permitted\":true,\"authority_scope_preserved\":true,\"commercial_terms_consistent\":true,\"constitution_satisfied\":true,\"counterparty_scope_satisfied\":true,\"deliverable_in_scope\":true,\"duplicate_semantic_purchase_absent\":true,\"evidence_semantically_sufficient\":true,\"external_dependencies_disclosed\":true,\"fulfillment_terms_defined\":true,\"prohibited_activity_absent\":true,\"purpose_aligned\":true}}",
+        "challenge_deadline": "1790352636",
+        "challenge_decision_id": "",
+        "commercial_terms": "Exactly one smallest native GEN unit; no commercial expansion or substitution.",
+        "counterparty": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "counterparty_authority_origin": "raw.githubusercontent.com",
+        "counterparty_identity_fingerprint": "72d2e85f400c2e9f16cb1518d7ca73c8c1f4b5151e2c060c434a38369efaa2e7",
+        "counterparty_identity_id": "C-1",
+        "created_at": "2026-09-25T15:59:51.501451Z",
+        "current_snapshot_id": "S-2",
+        "deliverable": "Completion requires the complete authenticated artifact exact immutable PAVEL artifact URL=https://raw.githubusercontent.com/GIFTEDLOV/pavel/555b0d62f8c854913b8591204d854c608756a46c/docs/ARCHITECTURE.md; sha256=4cbff61d228073e7a387e92f795b5732441c57d0b0c470c0452be882c015b605; byte_length=2470.",
+        "evidence_set_identity": "a9d6e4d4cbb3fa2a39b807d70e52abaf11d94856f81d023ca9ac5cd8840e45e9",
+        "expires_at": "1790359190",
+        "fulfillment": "{\"failed_checks\":[],\"fulfillment_deadline\":\"1790359190\",\"intent_fingerprint\":\"6580710e63d40399b944032fdc7dfad426c70c2ec04c27755a61bc9ed53a294c\",\"mandate_fingerprint\":\"f63ded3242cb4d6f426d77d9502bd3da28c1eb883e94baab28757b6e0e7eb1b1\",\"objective_checks\":{\"authorized_deliverable_identified\":true,\"delivery_corresponds_to_intent\":true,\"evidence_authentic\":true,\"mandate_requirements_preserved\":true,\"no_material_substitution\":true,\"provider_identity_consistent\":true,\"quantity_consistent\":true},\"result_status\":\"FULFILLED\",\"reviewed_at\":\"2026-09-25T16:08:36.529772Z\",\"schema\":\"pavel-fulfillment-v2\",\"semantic_evaluation\":\"CONSENSUS_ACCEPTED\",\"semantic_vector\":{\"completion_evidence_sufficient\":true,\"material_terms_satisfied\":true},\"snapshot_id\":\"S-2\"}",
+        "fulfillment_criteria": "The complete committed artifact must be authenticated and match the exact identity.",
+        "fulfillment_deadline": "1790359190",
+        "intent_fingerprint": "6580710e63d40399b944032fdc7dfad426c70c2ec04c27755a61bc9ed53a294c",
+        "intent_id": "I-1",
+        "last_error": "",
+        "mandate_id": "M-1",
+        "pre_challenge_status": "",
+        "principal": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "purpose": "Retrieve and deliver exact immutable PAVEL artifact URL=https://raw.githubusercontent.com/GIFTEDLOV/pavel/555b0d62f8c854913b8591204d854c608756a46c/docs/ARCHITECTURE.md; sha256=4cbff61d228073e7a387e92f795b5732441c57d0b0c470c0452be882c015b605; byte_length=2470.",
+        "recipient": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "settlement_direction": "RELEASE_TO_COUNTERPARTY",
+        "settlement_ready_at": "1790352636",
+        "status": "FULFILLED",
+        "submitted_at": "2026-09-25T16:00:31.935803Z",
+        "title": "Exact immutable PAVEL protocol artifact"
+      },
+      "settlement": {
+        "amount": "1",
+        "challenge_deadline": "1790352636",
+        "direction": "RELEASE_TO_COUNTERPARTY",
+        "fulfillment_deadline": "1790359190",
+        "fulfillment_result": {
+          "failed_checks": [],
+          "fulfillment_deadline": "1790359190",
+          "intent_fingerprint": "6580710e63d40399b944032fdc7dfad426c70c2ec04c27755a61bc9ed53a294c",
+          "mandate_fingerprint": "f63ded3242cb4d6f426d77d9502bd3da28c1eb883e94baab28757b6e0e7eb1b1",
+          "objective_checks": {
+            "authorized_deliverable_identified": true,
+            "delivery_corresponds_to_intent": true,
+            "evidence_authentic": true,
+            "mandate_requirements_preserved": true,
+            "no_material_substitution": true,
+            "provider_identity_consistent": true,
+            "quantity_consistent": true
+          },
+          "result_status": "FULFILLED",
+          "reviewed_at": "2026-09-25T16:08:36.529772Z",
+          "schema": "pavel-fulfillment-v2",
+          "semantic_evaluation": "CONSENSUS_ACCEPTED",
+          "semantic_vector": {
+            "completion_evidence_sufficient": true,
+            "material_terms_satisfied": true
+          },
+          "snapshot_id": "S-2"
+        },
+        "intent_fingerprint": "6580710e63d40399b944032fdc7dfad426c70c2ec04c27755a61bc9ed53a294c",
+        "intent_id": "I-1",
+        "mandate_id": "M-1",
+        "oldest_open_challenge": "",
+        "principal": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "ready_at": "1790352636",
+        "recipient": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "status": "FULFILLED"
+      }
+    }
+  },
+  "settlement": {
+    "tx": "0xfe07aae3b9b9e561ad0e86c9716e98c9ffdcfa5486b83002302e16dad2fa2bc3",
+    "state": {
+      "reservation": {
+        "agent": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "amount": "1",
+        "counterparty": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "intent_fingerprint": "6580710e63d40399b944032fdc7dfad426c70c2ec04c27755a61bc9ed53a294c",
+        "intent_id": "I-1",
+        "mandate_id": "M-1",
+        "principal": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "recipient": "0xcb5a845638cbc1f95d7f8343278685682c3ba13f",
+        "reserved_at": "2026-09-25T16:03:47.069094Z",
+        "settlement_id": "SETTLE:V1:53a7547d4563326bb5292b8f889e77374746a42b8d7bdc56ff97d02c138c5915",
+        "status": "RELEASE_PENDING"
+      },
+      "accounting": {
+        "available": "0",
+        "committed": "1",
+        "conserved": true,
+        "deposited": "1",
+        "epoch_spent": "1",
+        "epoch_start": "1790351925",
+        "mandate_id": "M-1",
+        "recovered": "0",
+        "refund_pending": "0",
+        "release_pending": "1",
+        "reserved": "0"
+      }
+    },
+    "externalObservation": "UNCONFIRMED"
+  }
+}

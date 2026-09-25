@@ -1,0 +1,33 @@
+{
+  "version": "V8",
+  "network": "studionet",
+  "rpc": "https://studio.genlayer.com/api",
+  "chainId": 61999,
+  "sourceCommit": "6819759400b3685d94c4a700433ba685f639a3dd",
+  "core": {
+    "address": "0x1540cEa5d3Df622068B2d3A22aac8Bcb31B900f4",
+    "deployTx": "0x115844714da2bc2fad78586f2498b4fcfd7ca25c288c36ce2caf5f7e7fcc3c10",
+    "sha256": "1636cc81461b5536103add686586308a05f599740a4e625e00825d8d11401e60",
+    "sourceParity": {
+      "address": "0x1540cEa5d3Df622068B2d3A22aac8Bcb31B900f4",
+      "sha256": "1636cc81461b5536103add686586308a05f599740a4e625e00825d8d11401e60",
+      "byteLength": 114713
+    }
+  },
+  "vault": {
+    "address": "0xac43A164AB9e82d7Af387059c04579FE48050fce",
+    "deployTx": "0xca6cde76b92365f5c061624376ce7922022d1847f60406773d2011fa5fe1f354",
+    "sha256": "f671005e07a658a17a7711807d23fa56bf0d6e2e85d0a266eafc17b03455f15c",
+    "sourceParity": {
+      "address": "0xac43A164AB9e82d7Af387059c04579FE48050fce",
+      "sha256": "f671005e07a658a17a7711807d23fa56bf0d6e2e85d0a266eafc17b03455f15c",
+      "byteLength": 20146
+    }
+  },
+  "binding": {
+    "vaultBindCoreTx": "0x82c1706eed8f37561ef19d98d105bbecd0a625ffbd08e2a01b4a43f244dda50a",
+    "coreSetVaultAddressTx": "0x756e43e7e43b5d8e54716c6e44c311488f3f8f677c47fbd8526df40cfadaf105",
+    "coreToVault": "0xac43a164ab9e82d7af387059c04579fe48050fce",
+    "vaultToCore": "0x1540cea5d3df622068b2d3a22aac8bcb31b900f4"
+  }
+}

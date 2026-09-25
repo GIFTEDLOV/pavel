@@ -32,6 +32,7 @@ const labels: Record<ProtocolStatus, { label: string; tone: StatusTone }> = {
   CHALLENGE_INADMISSIBLE: { label: "Challenge inadmissible", tone: "danger" },
   CHALLENGE_QUALIFYING: { label: "Qualifying challenge blocks settlement", tone: "warning" },
   ASSESSMENT_PENDING: { label: "Challenge assessment pending", tone: "warning" },
+  ASSESSMENT_RETRY_REQUIRED: { label: "Challenge assessment retry required", tone: "warning" },
   CHALLENGE_RESOLVED: { label: "Challenge resolved", tone: "neutral" },
   CHALLENGE_EXPIRED: { label: "Challenge expired", tone: "neutral" },
   SETTLEMENT_BLOCKED: { label: "Settlement blocked by qualifying challenge", tone: "warning" },
@@ -87,7 +88,7 @@ export function normalizeChallengeStatus(status: string): ProtocolStatus {
     INADMISSIBLE: "CHALLENGE_INADMISSIBLE",
     QUALIFYING: "CHALLENGE_QUALIFYING",
     ASSESSMENT_PENDING: "ASSESSMENT_PENDING",
-    ASSESSMENT_RETRY_REQUIRED: "CHALLENGE_RETRY_REQUIRED",
+    ASSESSMENT_RETRY_REQUIRED: "ASSESSMENT_RETRY_REQUIRED",
     RESOLVED: "CHALLENGE_RESOLVED",
     EXPIRED: "CHALLENGE_EXPIRED",
   };

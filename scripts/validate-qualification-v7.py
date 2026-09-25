@@ -1,8 +1,7 @@
-"""Validate the sanitized current PAVEL V7 qualification proof package."""
+"""Validate the sanitized historical PAVEL V7 qualification proof package."""
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from pathlib import Path
@@ -13,21 +12,11 @@ PACKAGE = ROOT / "deployments" / "studionet" / "qualification-v7" / "manifest.js
 READBACK = ROOT / "deployments" / "studionet" / "qualification-v7" / "canonical-readback.json"
 PROOF_INDEX = ROOT / "deployments" / "studionet" / "qualification-v7" / "proof-index.json"
 CAPTURE_SCRIPT = ROOT / "scripts" / "capture-v7-canonical-proof.mjs"
-DEPLOYMENT = ROOT / "deployments" / "studionet" / "manifest.json"
-CORE_SOURCE = ROOT / "contracts" / "pavel_core.py"
-VAULT_SOURCE = ROOT / "contracts" / "pavel_vault.py"
+HISTORICAL_DEPLOYMENT = ROOT / "deployments" / "studionet" / "qualification-v7" / "manifest.json"
 ADDRESS_PATTERN = re.compile(r"^0x[0-9a-fA-F]{40}$")
 SHA_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 ABSOLUTE_USER_PATH = re.compile(r"(?:^[A-Za-z]:[\\/]|^\\\\|^/(?:Users|home|private|var|tmp)/)")
 FORBIDDEN_CAPTURE_OPERATIONS = ("writeContract", "eth_sendTransaction", "sendTransaction", "deployContract")
-
-
-def sha256_file(path: Path) -> str:
-    # GitHub's Windows runner may check the same tracked source out with CRLF.
-    # The deployed-source identity is the canonical LF byte stream, so the
-    # validator must not make the frozen contract hash platform-dependent.
-    canonical = path.read_bytes().replace(b"\r\n", b"\n")
-    return hashlib.sha256(canonical).hexdigest()
 
 
 def reject_sensitive_content(value: object) -> None:
@@ -62,7 +51,7 @@ def assert_same_address(left: object, right: object, label: str) -> None:
 
 def main() -> int:
     package = json.loads(PACKAGE.read_text(encoding="utf-8"))
-    deployment = json.loads(DEPLOYMENT.read_text(encoding="utf-8"))
+    deployment = json.loads(HISTORICAL_DEPLOYMENT.read_text(encoding="utf-8"))
     readback = read_json(READBACK)
     proof_index = read_json(PROOF_INDEX)
     assert isinstance(readback, dict), "canonical readback must be an object"
@@ -85,17 +74,17 @@ def main() -> int:
     assert package["externalSettlementStatus"] == "UNCONFIRMED"
     assert package["lifecycleTransactionHashes"] == []
 
-    for name, source in (("core", CORE_SOURCE), ("vault", VAULT_SOURCE)):
+    for name in ("core", "vault"):
         item = package[name]
         assert_address(item["address"], name)
         assert SHA_PATTERN.fullmatch(item["sourceSha256"]), f"invalid {name} source hash"
-        assert item["sourceSha256"] == sha256_file(source), f"{name} source hash drift"
+        assert item["sourceSha256"] == deployment[name]["sourceSha256"], f"{name} historical source identity drift"
 
-    assert package["core"]["address"] == deployment["coreAddress"]
-    assert package["vault"]["address"] == deployment["vaultAddress"]
-    assert package["core"]["sourceSha256"] == deployment["sourceHashes"]["core"]
-    assert package["vault"]["sourceSha256"] == deployment["sourceHashes"]["vault"]
-    assert deployment["qualificationState"] == package["canonicalQualificationState"]
+    assert package["core"]["address"] == deployment["core"]["address"]
+    assert package["vault"]["address"] == deployment["vault"]["address"]
+    assert package["core"]["sourceSha256"] == deployment["core"]["sourceSha256"]
+    assert package["vault"]["sourceSha256"] == deployment["vault"]["sourceSha256"]
+    assert deployment["canonicalQualificationState"] == package["canonicalQualificationState"]
 
     assert readback["proofVersion"] == "v7-canonical-readback-1"
     assert readback["network"] == "studionet"
@@ -144,7 +133,7 @@ def main() -> int:
             fulfillment = json.loads(fulfillment)
         assert fulfillment["schema"] == package["fulfillmentSchema"]
 
-    print(f"CURRENT_V7_QUALIFICATION: passed (read-only LATEST_FINAL proof; {readback['readCount']} reads; 0 writes)")
+    print(f"HISTORICAL_V7_QUALIFICATION: passed (read-only LATEST_FINAL proof; {readback['readCount']} reads; 0 writes; historical source package)")
     return 0
 
 

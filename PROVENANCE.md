@@ -2,6 +2,38 @@
 
 Primary technical authority: [GenLayer full documentation](https://docs.genlayer.com/full-documentation.txt), reviewed 2026-09-20.
 
+## 2026-09 local steward remediation and V8 qualification
+
+This entry records the completed steward remediation after the deployed V7
+baseline. V8 Studionet deployment and qualification are complete; repository
+push/PR/production reconciliation are tracked as the final release gates. The
+historical V7 Core remains at
+`0xBA2356FfE5062506FA938da4715c03a2BE7929bF` with source hash
+`4acc04c4b684b35058b793973eec75569af9e981eb84d33167198615255b785a`.
+
+The corrected local Core hash is
+`1636cc81461b5536103add686586308a05f599740a4e625e00825d8d11401e60`.
+Vault source is unchanged at
+`f671005e07a658a17a7711807d23fa56bf0d6e2e85d0a266eafc17b03455f15c`.
+The Core assessment gate, challenge read/command surface, frontend gating,
+and local tests were updated on branch
+`fix/steward-challenge-fulfillment`. Core/Vault binding is one-shot, so the
+existing V7 Vault is not reusable with the corrected Core; V8 therefore uses a
+fresh pair and fresh qualification. Historical V1-V7 provenance remains intact.
+
+The active V8 pair is:
+
+| Field | Verified value |
+| --- | --- |
+| Core | `0x1540cEa5d3Df622068B2d3A22aac8Bcb31B900f4` |
+| Vault | `0xac43A164AB9e82d7Af387059c04579FE48050fce` |
+| Core SHA-256 | `1636cc81461b5536103add686586308a05f599740a4e625e00825d8d11401e60` |
+| Vault SHA-256 | `f671005e07a658a17a7711807d23fa56bf0d6e2e85d0a266eafc17b03455f15c` |
+| Qualification proof | `deployments/studionet/qualification-v8/` |
+| Challenge proof | `QUALIFYING` -> `CHALLENGE_BLOCKED` -> `EXPIRED` |
+| Fulfillment gate | Sequence one authenticated before assessment |
+| Final internal state | `RELEASE_PENDING`, conserved, external `UNCONFIRMED` |
+
 Secondary engineering references were inspected locally without copying product behavior:
 
 - `GIFTEDLOV/sentinelx` — evidence identity, retryable capture, source/deployment provenance, state-machine hardening.
@@ -10,7 +42,7 @@ Secondary engineering references were inspected locally without copying product 
 
 PAVEL is a distinct protocol. No live deployment addresses, transaction hashes, faucet state, or consensus proof are imported from those repositories.
 
-## Deployed V7 contract source
+## Historical deployed V7 contract source
 
 This identity is frozen and is not changed by the documentation or frontend
 cleanup in this pass.
@@ -27,10 +59,10 @@ cleanup in this pass.
 | Canonical qualification state | `FULFILLED / RELEASE_PENDING` |
 | External settlement | `UNCONFIRMED` |
 
-## Current repository release
+## Historical V7 repository and production release
 
-The repository release is the final Git commit after this V7.0.1 hardening
-pass, not the historical source baseline below. The source and proof commit
+The values below document the historical V7 repository and production
+release. They are not the active V8 source or deployment.
 that was verified before this provenance metadata update is recorded
 explicitly below.
 
@@ -46,16 +78,16 @@ The deployment above was queried from Vercel's deployment API and its
 commit is documentation-only. Because the Vercel Git integration can create a
 new production deployment for this provenance commit, the final deployment
 whose `githubCommitSha` equals the final repository `HEAD` is the
-release-authoritative record and is recorded in the PAVEL V7.0.1 GitHub
-Release metadata. The provenance process deliberately stops there rather than
+release-authoritative record for the historical V7 application and is recorded
+in its historical release metadata. The provenance process deliberately stops there rather than
 creating a recursive deployment/documentation loop.
 
 | Field | Verified value |
 | --- | --- |
 | Repository | <https://github.com/GIFTEDLOV/pavel> |
-| Release tag | `v7.0.1` (final repository HEAD) |
+| Release tag | `v7.0.1` (historical V7 repository HEAD) |
 | Production alias | <https://pavel-nine.vercel.app> |
-| Vercel deployment | See `PRODUCTION_DEPLOYMENT_ID` above and the final V7.0.1 GitHub Release record |
+| Vercel deployment | Historical V7 deployment record |
 | Frontend release | Current `frontend/` source deployed by the Vercel deployment above |
 | External settlement | `UNCONFIRMED` |
 
@@ -83,7 +115,7 @@ Core, a finalized Vault, bidirectional binding, principal registration, and
 agent registration; remaining lifecycle writes await explicit fixed-source
 deployment followed by secure manual signing.
 The historical qualification-v2 manifest remained undeployed by design; the
-active V7 manifest is the current runtime record.
+active V8 manifest is the current runtime record; V7 remains historical.
 
 The qualification-v2 root-Mandate integration failures are both preserved.
 Transaction `0xcc4d6551d0f76df05bc8c0eefdef5e1e2a593433ede6979fd208a4220f5f64b0`
