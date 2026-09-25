@@ -421,10 +421,12 @@ async function run() {
   saveState(state);
   const opened = await executeWrite({client, account, state, abi, label: "core:open_dispute", address: core, functionName: "open_dispute", args: [intentId, "Independent review of the authenticated fulfillment artifact and its committed settlement identity."], precondition: async () => { const item = asRecord(await readLatest(client, core, "get_intent", [intentId], latestFinal)); if (item.status !== "FULFILLED") throw new Error(`Challenge open precondition status=${item.status}`); }, postcondition: async () => { const count = Number(await readLatest(client, core, "get_challenge_count", [intentId], latestFinal)); if (count !== challengeCountBefore + 1) throw new Error("Challenge count did not advance exactly once"); const challengeId = text(await readLatest(client, core, "get_challenge_id", [intentId, BigInt(count - 1)], latestFinal)); const challenge = asRecord(await readLatest(client, core, "get_dispute", [challengeId], latestFinal)); if (challenge.status !== "SUBMITTED") throw new Error(`New challenge is not SUBMITTED: ${challenge.status}`); return {count, challengeId, challenge}; }});
   const challengeId = opened.readback.challengeId;
-  const submittedSettlement = asRecord(await readLatest(client, core, "get_settlement_instruction", [intentId], latestFinal));
-  if (submittedSettlement.status === "CHALLENGE_BLOCKED" || submittedSettlement.direction === "") throw new Error("SUBMITTED challenge incorrectly blocked settlement");
-  state.observations.submittedChallengeSettlement = submittedSettlement;
-  saveState(state);
+  const submittedSettlement = state.observations.submittedChallengeSettlement ?? asRecord(await readLatest(client, core, "get_settlement_instruction", [intentId], latestFinal));
+  if (!state.observations.submittedChallengeSettlement) {
+    if (submittedSettlement.status === "CHALLENGE_BLOCKED" || submittedSettlement.direction === "") throw new Error("SUBMITTED challenge incorrectly blocked settlement");
+    state.observations.submittedChallengeSettlement = submittedSettlement;
+    saveState(state);
+  }
 
   const challengeEvidenceCountBefore = Number(opened.readback.challenge.evidence_ids ? String(opened.readback.challenge.evidence_ids).split(",").filter(Boolean).length : 0);
   const definedChallenge = await executeWrite({client, account, state, abi, label: "core:define_challenge_evidence", address: core, functionName: "define_challenge_evidence", args: [challengeId, CHALLENGE_EVIDENCE.kind, CHALLENGE_EVIDENCE.url, AUTHORITY, evidence.challenge.sha256, BigInt(evidence.challenge.byteLength), AUTHORITY, BigInt(challengeEvidenceCountBefore)], postcondition: async () => { const challenge = asRecord(await readLatest(client, core, "get_dispute", [challengeId], latestFinal)); const record = asRecord(await readLatest(client, core, "get_challenge_evidence", [challengeId, BigInt(challengeEvidenceCountBefore)], latestFinal)); const count = String(challenge.evidence_ids ?? "").split(",").filter(Boolean).length; if (Number(count) !== challengeEvidenceCountBefore + 1 || record.evidence_kind !== "CHALLENGE") throw new Error("Challenge evidence count/record did not advance exactly once"); return {challenge, record}; }});
