@@ -52,6 +52,16 @@ accounting, and Core-directed settlement.
 
 ## Why PAVEL
 
+## Steward remediation boundary
+
+The deployed V7 addresses above remain the historical/current deployed release
+and still run the recorded V7 Core source (`4acc04c4...b785a`). This local
+remediation changes Core source to require authenticated canonical fulfillment
+evidence at sequence 1 before assessment (`1636cc81461b...401e60`) and adds
+the complete canonical challenge command/read workflow in the application.
+The corrected source is not deployed, the active addresses are intentionally
+unchanged, and a fresh Core/Vault qualification is pending.
+
 Agents can be useful at the boundary between policy and real-world evidence,
 but unrestricted model authority is not an acceptable custody model. PAVEL
 keeps the high-consequence parts explicit:

@@ -1,5 +1,23 @@
 # Protocol
 
+## Remediation: canonical fulfillment gate and challenge read model
+
+`assess_fulfillment` now fails closed before objective checks, semantic
+consensus, or fulfillment-result writes unless the exact sequence-one
+`FULFILLMENT` definition has an authenticated capture in an immutable regular
+Intent snapshot. The gate verifies identity, Intent/Mandate/policy binding,
+authority, committed SHA-256, committed byte length, complete UTF-8 content,
+and the 4096-byte fulfillment bound. Missing, staged-only, malformed, or
+challenge evidence leaves the Intent `FULFILLMENT_PENDING` with no settlement
+direction.
+
+The application reads `get_challenge_count`, `get_challenge_id`,
+`get_dispute`, `get_challenge_evidence`, `get_snapshot`, and
+`get_settlement_instruction` at `LATEST_FINAL`. `SUBMITTED` is displayed as a
+notice; only canonical `QUALIFYING` state is shown as `CHALLENGE_BLOCKED` with
+an empty settlement direction. The corrected source is pending a new
+qualification deployment; the deployed V7 boundary is unchanged.
+
 ## Mandates
 
 A principal creates a DRAFT Mandate, configures bounded fields and sealed HTTPS authority constraints, then seals it. Sealing computes a domain-separated SHA-256 fingerprint over canonical JSON. A sealed Mandate is immutable; revocation changes only current validity and retains the original record and fingerprint.

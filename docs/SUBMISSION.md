@@ -30,3 +30,16 @@ External transfer: UNCONFIRMED
 
 `RELEASE_PENDING` is not presented as external payment completion. V1–V6
 qualification failures remain preserved as historical provenance.
+
+## Remediation status
+
+The submission addresses and lifecycle above describe deployed V7. The local
+steward remediation is source-only and pending deployment: Core now requires
+authenticated sequence-one fulfillment evidence before assessment, and the
+frontend contains the complete canonical challenge workflow. The corrected
+Core SHA-256 is
+`1636cc81461b5536103add686586308a05f599740a4e625e00825d8d11401e60`; the
+deployed V7 Core still has SHA-256
+`4acc04c4b684b35058b793973eec75569af9e981eb84d33167198615255b785a`.
+No active address, deployment manifest, or hosted claim is changed by this
+local pass. A fresh Core/Vault qualification is required before release.

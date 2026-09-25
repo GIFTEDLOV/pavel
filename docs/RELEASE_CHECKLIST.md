@@ -25,3 +25,17 @@ runtime configuration.
 
 Do not call `ACCEPTED` success, rebroadcast an ambiguous transaction, use a
 historical address, weaken source authority, or label `RELEASE_PENDING` paid.
+
+## Steward remediation release boundary
+
+The checked-off list above describes the already deployed V7 release and is
+not a claim that the corrected local source is deployed. For this remediation:
+
+- [x] Core assessment is contract-gated on authenticated canonical sequence-one fulfillment evidence.
+- [x] Challenge define, stage, adjudicate, expiry, recovery, reads, and settlement-block presentation are wired to canonical state.
+- [x] Local frontend tests, typecheck, lint, and production build pass.
+- [ ] Direct Mode / full contract qualification rerun on the corrected source.
+- [ ] Fresh Core/Vault deployment and bidirectional binding.
+- [ ] Fresh qualification, source-hash gate, GitHub push, and production reconciliation.
+
+Do not update active V7 addresses until the fresh pair is qualified.

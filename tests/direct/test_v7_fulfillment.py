@@ -1,3 +1,4 @@
+import hashlib
 import json
 
 import pytest
@@ -82,16 +83,109 @@ def test_v7_fulfillment_schema_is_exactly_three_keys_and_v1_is_rejected(direct_v
 
 
 @pytest.mark.direct
-def test_objective_failure_rejects_without_semantic_review(direct_vm, direct_deploy, direct_owner, direct_alice):
+def test_assess_fulfillment_requires_authenticated_sequence_one_evidence(direct_vm, direct_deploy, direct_owner, direct_alice):
     core, intent_id, _agent = _pending_core(direct_vm, direct_deploy, direct_owner, direct_alice)
+    before = json.loads(core.get_intent(intent_id))
+    history_before = len(core.history)
+    with direct_vm.expect_revert("authenticated sequence-one fulfillment evidence is required"):
+        core.assess_fulfillment(intent_id)
+    after = json.loads(core.get_intent(intent_id))
+    assert after == before
+    assert after["status"] == "FULFILLMENT_PENDING"
+    assert after["settlement_direction"] == ""
+    assert after["fulfillment"] == ""
+    assert len(core.history) == history_before
+
+
+@pytest.mark.direct
+def test_defined_but_unstaged_sequence_one_evidence_cannot_be_assessed(direct_vm, direct_deploy, direct_owner, direct_alice):
+    core, intent_id, agent = _pending_core(direct_vm, direct_deploy, direct_owner, direct_alice)
+    body = "Provider: Atlas GPU\nAmount: 3 GEN"
+    direct_vm.sender = agent
+    core.define_evidence(intent_id, "FULFILLMENT", "https://evidence.example/fulfillment", "evidence.example", hashlib.sha256(body.encode()).hexdigest(), len(body.encode()), "mirror.example", 1)
+    before = json.loads(core.get_intent(intent_id))
+    with direct_vm.expect_revert("authenticated sequence-one fulfillment evidence is required"):
+        core.assess_fulfillment(intent_id)
+    assert json.loads(core.get_intent(intent_id)) == before
+
+
+@pytest.mark.direct
+def test_sequence_one_wrong_kind_cannot_be_assessed(direct_vm, direct_deploy, direct_owner, direct_alice):
+    core, intent_id, agent = _pending_core(direct_vm, direct_deploy, direct_owner, direct_alice)
+    body = "not fulfillment evidence"
+    direct_vm.sender = agent
+    core.define_evidence(intent_id, "QUOTE", "https://evidence.example/wrong-kind", "evidence.example", hashlib.sha256(body.encode()).hexdigest(), len(body.encode()), "mirror.example", 1)
+    direct_vm.mock_web(r"evidence\.example/wrong-kind", {"status": 200, "body": body})
+    core.stage_evidence(intent_id)
+    with direct_vm.expect_revert("authenticated sequence-one fulfillment evidence is required"):
+        core.assess_fulfillment(intent_id)
+    item = json.loads(core.get_intent(intent_id))
+    assert item["status"] == "FULFILLMENT_PENDING"
+    assert item["settlement_direction"] == ""
+    assert item["fulfillment"] == ""
+
+
+@pytest.mark.direct
+def test_later_fulfillment_definition_cannot_replace_invalid_sequence_one(direct_vm, direct_deploy, direct_owner, direct_alice):
+    core, intent_id, agent = _pending_core(direct_vm, direct_deploy, direct_owner, direct_alice)
+    wrong_body = "sequence one is not fulfillment"
+    later_body = "sequence two fulfillment"
+    direct_vm.sender = agent
+    core.define_evidence(intent_id, "QUOTE", "https://evidence.example/wrong-sequence", "evidence.example", hashlib.sha256(wrong_body.encode()).hexdigest(), len(wrong_body.encode()), "mirror.example", 1)
+    core.define_evidence(intent_id, "FULFILLMENT", "https://evidence.example/later", "evidence.example", hashlib.sha256(later_body.encode()).hexdigest(), len(later_body.encode()), "mirror.example", 2)
+    direct_vm.mock_web(r"evidence\.example/wrong-sequence", {"status": 200, "body": wrong_body})
+    direct_vm.mock_web(r"evidence\.example/later", {"status": 200, "body": later_body})
+    core.stage_evidence(intent_id)
+    with direct_vm.expect_revert("authenticated sequence-one fulfillment evidence is required"):
+        core.assess_fulfillment(intent_id)
+    item = json.loads(core.get_intent(intent_id))
+    assert item["status"] == "FULFILLMENT_PENDING"
+    assert item["settlement_direction"] == ""
+    assert item["fulfillment"] == ""
+
+
+@pytest.mark.parametrize("mutation", ["hash", "length", "identity", "authority", "capture"])
+@pytest.mark.direct
+def test_sequence_one_capture_hash_length_and_identity_mismatches_fail_closed(direct_vm, direct_deploy, direct_owner, direct_alice, mutation):
+    core, intent_id, _agent = _pending_core(direct_vm, direct_deploy, direct_owner, direct_alice, fulfillment_body="Provider: Atlas GPU\nAmount: 3 GEN")
+    item = json.loads(core.get_intent(intent_id))
+    evidence_id = core.evidence_index[intent_id + "|1"]
+    if mutation == "authority":
+        item["counterparty_authority_origin"] = "other.example"
+        core.intents[intent_id] = json.dumps(item, sort_keys=True, separators=(",", ":"))
+    elif mutation == "identity":
+        definition = json.loads(core.evidence_defs[evidence_id])
+        definition["identity_fingerprint"] = "f" * 64
+        core.evidence_defs[evidence_id] = json.dumps(definition, sort_keys=True, separators=(",", ":"))
+    else:
+        snapshot = json.loads(core.snapshots[item["current_snapshot_id"]])
+        for capture in snapshot["captures"]:
+            if capture["evidence_id"] == evidence_id:
+                if mutation == "hash":
+                    capture["sha256"] = "f" * 64
+                elif mutation == "length":
+                    capture["byte_length"] = capture["byte_length"] + 1
+                else:
+                    capture["capture_class"] = "INFRASTRUCTURE_FAILURE"
+        core.snapshots[item["current_snapshot_id"]] = json.dumps(snapshot, sort_keys=True, separators=(",", ":"))
+    before = json.loads(core.get_intent(intent_id))
+    with direct_vm.expect_revert("authenticated sequence-one fulfillment evidence is required"):
+        core.assess_fulfillment(intent_id)
+    after = json.loads(core.get_intent(intent_id))
+    assert after == before
+    assert after["status"] == "FULFILLMENT_PENDING"
+    assert after["settlement_direction"] == ""
+    assert after["fulfillment"] == ""
+
+
+@pytest.mark.direct
+def test_authenticated_sequence_one_evidence_allows_assessment(direct_vm, direct_deploy, direct_owner, direct_alice):
+    core, intent_id, _agent = _pending_core(direct_vm, direct_deploy, direct_owner, direct_alice, fulfillment_body="Provider: Atlas GPU\nAmount: 3 GEN")
+    direct_vm.mock_llm(r"PAVEL fulfillment", json.dumps(_semantic()))
     core.assess_fulfillment(intent_id)
     item = json.loads(core.get_intent(intent_id))
-    record = json.loads(item["fulfillment"])
-    assert item["status"] == "NOT_FULFILLED"
-    assert item["settlement_direction"] == "REFUND_TO_PRINCIPAL"
-    assert record["semantic_vector"] == {}
-    assert record["semantic_evaluation"] == "OBJECTIVE_CHECKS_FAILED"
-    assert "evidence_authentic" in record["failed_checks"]
+    assert item["status"] == "FULFILLED"
+    assert item["settlement_direction"] == "RELEASE_TO_COUNTERPARTY"
 
 
 @pytest.mark.direct
@@ -110,8 +204,6 @@ def test_all_objective_checks_and_semantic_checks_produce_fulfilled(direct_vm, d
 
 @pytest.mark.parametrize("field", [
     "authorized_deliverable_identified",
-    "provider_identity_consistent",
-    "evidence_authentic",
     "delivery_corresponds_to_intent",
     "quantity_consistent",
     "no_material_substitution",
@@ -124,21 +216,11 @@ def test_each_v7_objective_check_can_independently_fail_closed(direct_vm, direct
     if field == "authorized_deliverable_identified":
         item["deliverable"] = ""
         core.intents[intent_id] = json.dumps(item, sort_keys=True, separators=(",", ":"))
-    elif field == "provider_identity_consistent":
-        item["counterparty_authority_origin"] = "other.example"
-        core.intents[intent_id] = json.dumps(item, sort_keys=True, separators=(",", ":"))
-    elif field == "evidence_authentic":
-        snapshot = json.loads(core.snapshots[item["current_snapshot_id"]])
-        for capture in snapshot["captures"]:
-            definition = json.loads(core.evidence_defs[capture["evidence_id"]])
-            if definition["evidence_kind"] == "FULFILLMENT":
-                capture["sha256"] = "f" * 64
-        core.snapshots[item["current_snapshot_id"]] = json.dumps(snapshot, sort_keys=True, separators=(",", ":"))
     elif field in ("delivery_corresponds_to_intent", "no_material_substitution"):
-        evidence_id = core.evidence_index[intent_id + "|1"]
-        definition = json.loads(core.evidence_defs[evidence_id])
-        definition["committed_sha256"] = "f" * 64
-        core.evidence_defs[evidence_id] = json.dumps(definition, sort_keys=True, separators=(",", ":"))
+        authorization_id = core.evidence_index[intent_id + "|0"]
+        definition = json.loads(core.evidence_defs[authorization_id])
+        definition["origin_url"] = "https://evidence.example/different"
+        core.evidence_defs[authorization_id] = json.dumps(definition, sort_keys=True, separators=(",", ":"))
     elif field == "quantity_consistent":
         item["amount"] = "0"
         core.intents[intent_id] = json.dumps(item, sort_keys=True, separators=(",", ":"))

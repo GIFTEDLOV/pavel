@@ -2,6 +2,24 @@
 
 Primary technical authority: [GenLayer full documentation](https://docs.genlayer.com/full-documentation.txt), reviewed 2026-09-20.
 
+## 2026-09 local steward remediation
+
+This entry records a source-only remediation after the deployed V7 baseline.
+No Studionet write, deployment, GitHub push, PR, or Vercel deployment was
+performed. The deployed V7 Core remains at
+`0xBA2356FfE5062506FA938da4715c03a2BE7929bF` with source hash
+`4acc04c4b684b35058b793973eec75569af9e981eb84d33167198615255b785a`.
+
+The corrected local Core hash is
+`1636cc81461b5536103add686586308a05f599740a4e625e00825d8d11401e60`.
+Vault source is unchanged at
+`f671005e07a658a17a7711807d23fa56bf0d6e2e85d0a266eafc17b03455f15c`.
+The Core assessment gate, challenge read/command surface, frontend gating,
+and local tests were updated on branch
+`fix/steward-challenge-fulfillment`. Core/Vault binding is one-shot, so the
+existing V7 Vault is not reusable with the corrected Core; a fresh pair and
+qualification are pending. Historical V1-V7 provenance remains intact.
+
 Secondary engineering references were inspected locally without copying product behavior:
 
 - `GIFTEDLOV/sentinelx` — evidence identity, retryable capture, source/deployment provenance, state-machine hardening.

@@ -20,6 +20,7 @@ export interface WriteRequest {
   args: readonly unknown[];
   value?: bigint;
   targetState?: string;
+  beforeChallengeEvidenceCount?: number;
 }
 
 export interface ActiveTransaction extends WriteRequest {
@@ -33,15 +34,27 @@ function verifyCanonicalPostcondition(request: WriteRequest, snapshot: ProtocolS
   const id = String(request.args[0] ?? "");
   const intent = snapshot.intents.find((item) => item.intent_id === id);
   const mandate = snapshot.mandates.find((item) => item.mandate_id === id);
+  const challenge = Object.values(snapshot.challenges).flat().find((item) => item.challenge_id === id);
+  const challengeEvidence = snapshot.challengeEvidence[id] ?? [];
+  const challengeForEvidence = request.method === "configure_evidence_recovery"
+    ? Object.values(snapshot.challenges).flat().find((item) => item.evidence_ids.split(",").includes(String(request.args[1] ?? "")))
+    : undefined;
   switch (request.method) {
     case "authorize_intent": return Boolean(snapshot.authorizations[id]?.authorization_decision === "AUTHORIZED" || intent?.status === "REJECTED");
     case "reserve": return snapshot.reservations[id]?.status === "RESERVED";
     case "request_release": return snapshot.reservations[id]?.status === "RELEASE_PENDING" && snapshot.settlements[id]?.direction === "RELEASE_TO_COUNTERPARTY";
     case "request_refund": return snapshot.reservations[id]?.status === "REFUND_PENDING" && snapshot.settlements[id]?.direction === "REFUND_TO_PRINCIPAL";
     case "submit_intent": return intent?.status === "SUBMITTED";
-    case "stage_evidence": return intent?.status === "EVIDENCE_READY" || intent?.status === "FULFILLMENT_PENDING";
+    case "stage_evidence": return ["EVIDENCE_READY", "FULFILLMENT_PENDING", "EVIDENCE_RETRY_REQUIRED", "EVIDENCE_RECOVERY_REQUIRED", "EVIDENCE_REPAIR_REQUIRED"].includes(intent?.status ?? "");
     case "start_fulfillment": return intent?.status === "FULFILLMENT_PENDING";
     case "assess_fulfillment": return ["FULFILLED", "NOT_FULFILLED", "FULFILLMENT_RETRY_REQUIRED"].includes(intent?.status ?? "");
+    case "expire_fulfillment": return intent?.status === "FULFILLMENT_EXPIRED";
+    case "configure_evidence_recovery": return ["EVIDENCE_RETRY_REQUIRED", "EVIDENCE_RECOVERY_REQUIRED", "EVIDENCE_REPAIR_REQUIRED"].includes(intent?.status ?? "") || ["EVIDENCE_RETRY_REQUIRED", "EVIDENCE_RECOVERY_REQUIRED", "EVIDENCE_REPAIR_REQUIRED"].includes(challengeForEvidence?.status ?? "");
+    case "open_dispute": return Boolean(snapshot.challenges[id]?.some((item) => item.intent_id === id));
+    case "define_challenge_evidence": return Boolean(challenge && request.beforeChallengeEvidenceCount !== undefined && challengeEvidence.length === request.beforeChallengeEvidenceCount + 1 && ["EVIDENCE_PENDING", "EVIDENCE_RETRY_REQUIRED"].includes(challenge.status));
+    case "stage_challenge_evidence": return Boolean(challenge && ["QUALIFYING", "EVIDENCE_RETRY_REQUIRED", "INADMISSIBLE"].includes(challenge.status));
+    case "adjudicate_dispute": return Boolean(challenge && ["RESOLVED", "ASSESSMENT_RETRY_REQUIRED"].includes(challenge.status));
+    case "expire_challenge": return challenge?.status === "EXPIRED";
     case "seal_mandate": return mandate?.status === "SEALED";
     case "configure_mandate": return Boolean(mandate && mandate.status === "DRAFT");
     case "deposit": return Boolean(snapshot.accounting[id] && BigInt(snapshot.accounting[id]?.deposited ?? "0") > 0n);
@@ -171,11 +184,14 @@ export function PavelProvider({ children }: { children: ReactNode }) {
       return { ...current, stage: "FINALIZING" };
     });
     if (result === "FINALIZED") {
-      const refreshed = await refreshSnapshot({ intentId: request?.method === "reserve" || request?.method === "authorize_intent" || request?.method === "submit_intent" || request?.method === "stage_evidence" || request?.method === "assess_fulfillment" || request?.method === "start_fulfillment" ? String(request.args[0] ?? "") : undefined, mandateId: request?.method === "deposit" ? String(request.args[0] ?? "") : undefined });
+      const challengeIntentId = request && ["define_challenge_evidence", "stage_challenge_evidence", "adjudicate_dispute", "expire_challenge"].includes(request.method)
+        ? Object.values(snapshot?.challenges ?? {}).flat().find((item) => item.challenge_id === String(request.args[0] ?? ""))?.intent_id
+        : undefined;
+      const refreshed = await refreshSnapshot({ intentId: request && (request.method === "reserve" || request.method === "authorize_intent" || request.method === "submit_intent" || request.method === "stage_evidence" || request.method === "assess_fulfillment" || request.method === "start_fulfillment" || request.method === "expire_fulfillment" || request.method === "configure_evidence_recovery" || request.method === "open_dispute") ? String(request.args[0] ?? "") : challengeIntentId, mandateId: request?.method === "deposit" ? String(request.args[0] ?? "") : undefined });
       const verified = request && refreshed ? verifyCanonicalPostcondition(request, refreshed) : false;
       setActiveTransaction((current) => current && current.hash === hash ? { ...current, stage: verified ? "CANONICAL_VERIFIED" : "FINALIZED_SUCCESS", error: verified ? undefined : "Execution finalized; latest-final state was refreshed, but this action has no automatic postcondition proof." } : current);
     }
-  }, [refreshSnapshot]);
+  }, [refreshSnapshot, snapshot]);
 
   const submitWrite = useCallback(async (request: WriteRequest) => {
     if (wallet.status !== "CONNECTED" || !wallet.address) {

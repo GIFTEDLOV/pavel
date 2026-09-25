@@ -2,6 +2,24 @@
 
 PAVEL separates constitutional authority from economic custody.
 
+## Steward remediation boundary
+
+The corrected local Core adds a contract-level precondition to fulfillment
+assessment: canonical sequence-one authenticated evidence must be present and
+complete before deterministic or semantic assessment begins. The frontend
+mirrors this gate and exposes sequence-zero authorization evidence separately.
+
+The application challenge surface is read-model driven. It enumerates indexed
+challenge records and evidence, derives append-only evidence sequence from
+canonical state, and verifies each write by a `LATEST_FINAL` postcondition.
+Only a qualifying challenge blocks settlement. A submitted challenge is
+visible but does not create a local settlement veto.
+
+V7 binding is one-shot in both directions. Core source hash
+`1636cc81461b5536103add686586308a05f599740a4e625e00825d8d11401e60` therefore
+requires a fresh Core; the deployed V7 Vault remains bound to the historical
+Core and is not reusable. The corrected pair is not deployed.
+
 ## PavelCore
 
 Core owns principals, registered agents, authority-bound counterparty identities, Mandates, definition fingerprints, delegation ancestry, Intents, evidence definitions, staged capture results, immutable snapshots, semantic vectors, permissionless independently indexed challenges, challenge deadlines, revocation, and settlement directions. Core never stores a Vault balance as authoritative truth.

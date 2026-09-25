@@ -56,3 +56,25 @@ state guards; a repeat is rejected or is a deterministic idempotent registry
 operation. Direct Mode cannot execute a real Core/Vault pair in one harness,
 so cross-contract positive paths use typed fake-view boundaries plus the
 static `CORE_VAULT_INTERFACE_PARITY` gate.
+
+## Steward contract-to-frontend parity audit
+
+| Contract method / view | Frontend action or readback | Postcondition / test | Status |
+|---|---|---|---|
+| `define_challenge_evidence` | `/app/disputes` challenger form; canonical next sequence | Challenge evidence record advances; frontend reads `get_challenge_evidence` | PASS |
+| `stage_challenge_evidence` | `/app/disputes` stage action | `QUALIFYING`, `EVIDENCE_RETRY_REQUIRED`, or `INADMISSIBLE`; refreshed `get_dispute` | PASS |
+| `configure_evidence_recovery` | Challenge and fulfillment recovery forms | Canonical retry/recovery state after `LATEST_FINAL` refresh | PASS |
+| `adjudicate_dispute` | `/app/disputes` only for qualifying/retry states | `RESOLVED` or `ASSESSMENT_RETRY_REQUIRED`; resolution read from `get_dispute` | PASS |
+| `expire_challenge` | Deadline/grace-aware action; browser does not synthesize expiry | `EXPIRED`; challenge no longer appears as qualifying blocker | PASS |
+| `get_dispute`, `get_challenge_count`, `get_challenge_id`, `get_challenge_evidence` | `readProtocolSnapshot` challenge index/read model | Typed challenge/evidence records, IDs, errors, statuses | PASS |
+| `get_snapshot` | Independent challenge snapshot proof and fulfillment capture state | Snapshot identity, capture class, hash, length, and evidence-set identity | PASS |
+| `get_settlement_instruction` | Disputes settlement proof and intent settlement card | `CHALLENGE_BLOCKED` is visible with empty direction only for qualifying blockers | PASS |
+| `start_fulfillment` | Intent custody action | Intent becomes `FULFILLMENT_PENDING` | PASS |
+| `stage_evidence` | Intent sequence-zero/sequence-one evidence actions | Authenticated or explicit retry/recovery/repair state | PASS |
+| `assess_fulfillment` | Intent action only when canonical sequence-one evidence is authenticated | Contract gate runs before objective/semantic work; result or retry; premature state-mutation regression tests | PASS |
+| `expire_fulfillment` | Contract-deadline action on intent page | `FULFILLMENT_EXPIRED` | PASS |
+
+All security-relevant writes retain the discipline `BROADCAST ONCE` -> persist
+hash -> reconcile the same hash -> finalized execution result -> latest-final
+application readback. No production address or deployment manifest is changed
+by this remediation.

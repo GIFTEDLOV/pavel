@@ -3,6 +3,19 @@
 The following are machine-testable security invariants implemented or exercised
 by the current V7 source:
 
+32. `assess_fulfillment` cannot evaluate objective checks, invoke semantic
+    consensus, or write an outcome until canonical sequence-one `FULFILLMENT`
+    evidence is authenticated in an immutable regular Intent snapshot.
+33. Sequence-one fulfillment authentication requires valid identity and
+    Intent/Mandate/policy binding, permitted counterparty authority, committed
+    SHA-256 and byte length equality, complete UTF-8 content, and a non-empty
+    artifact no larger than 4096 bytes.
+34. Missing, wrong-kind, wrong-sequence, staged-only, recovery-invalid,
+    malformed, or challenge evidence fails closed and preserves
+    `FULFILLMENT_PENDING` with no fulfillment result or settlement direction.
+35. The application cannot infer authentication from a finalized transaction;
+    it must read canonical capture and snapshot state at `LATEST_FINAL`.
+
 1. Sealed Mandate policy fields and definition fingerprint never change through public methods.
 2. A child's transaction cap, epoch budget, total budget, expiry, valid-from, challenge window, and source authorities never exceed parent protection bounds.
 3. A semantic vector cannot mutate Intent economic fields.
