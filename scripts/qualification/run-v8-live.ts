@@ -240,6 +240,9 @@ async function executeWrite({client, account, state, abi, label, address, functi
   if (existing?.tx) {
     const reconciled = await reconcileSameHash({client, hash: existing.tx, interval: POLL_MS});
     requireSuccessfulExecution(reconciled.tx);
+    if (existing.status === "COMPLETE" && existing.canonical_postcondition_met === true) {
+      return {hash: existing.tx, tx: reconciled.tx, readback: existing.readback};
+    }
     const readback = await postcondition();
     state.steps[label] = {...existing, status: "COMPLETE", terminal_status: txStatus(reconciled.tx), execution: txExecution(reconciled.tx), consensus_result: txConsensus(reconciled.tx), execution_success: true, canonical_postcondition_met: true, readback: jsonSafe(readback)};
     saveState(state);
