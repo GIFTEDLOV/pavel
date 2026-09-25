@@ -177,11 +177,20 @@ function loadState() {
 }
 
 async function chainTime(client: AnyRecord) {
-  const block = await client.request({method: "eth_getBlockByNumber", params: ["latest", false]});
-  const raw = block?.timestamp;
-  const value = typeof raw === "string" && raw.startsWith("0x") ? Number.parseInt(raw.slice(2), 16) : Number(raw);
-  if (!Number.isSafeInteger(value) || value <= 0) throw new Error("Studionet chain timestamp unavailable");
-  return {chainNow: value, blockNumber: block?.number ?? null};
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      const block = await client.request({method: "eth_getBlockByNumber", params: ["latest", false]});
+      const raw = block?.timestamp;
+      const value = typeof raw === "string" && raw.startsWith("0x") ? Number.parseInt(raw.slice(2), 16) : Number(raw);
+      if (!Number.isSafeInteger(value) || value <= 0) throw new Error("Studionet chain timestamp unavailable");
+      return {chainNow: value, blockNumber: block?.number ?? null};
+    } catch (error) {
+      lastError = error;
+      if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Studionet chain timestamp unavailable");
 }
 
 async function waitForChainTime(client: AnyRecord, target: number, label: string) {
